@@ -15,8 +15,14 @@ env/
 # ============================================
 # SENSITIVE — Client data (repos, secrets, profiles)
 # ============================================
-clients/
-memory/
+# Ignore all client data except the example template
+clients/*
+!clients/_example/
+
+# Ignore all memory data except the README
+memory/*
+!memory/README.md
+
 *.db
 
 # ============================================

@@ -1,0 +1,85 @@
+# ============================================================
+#  HiveMind — Client Configuration Template
+# ============================================================
+#  Copy this directory to clients/<your-client>/ and edit.
+#
+#  Example:
+#    mkdir clients\acme
+#    copy clients\_example\repos.yaml clients\acme\repos.yaml
+#
+#  Then edit clients\acme\repos.yaml with your actual repos.
+# ============================================================
+
+client_name: acme
+display_name: "Acme Corp"
+
+repos:
+  # ---------------------------------------------------------
+  #  CI/CD pipelines (Harness, GitHub Actions, etc.)
+  # ---------------------------------------------------------
+  - name: acme-harness-pipelines
+    path: "C:\\Repos\\acme-harness-pipelines"
+    type: cicd
+    platform: harness
+    branches:
+      - main
+      - develop
+      - release_26_3
+    description: "Harness CI/CD pipeline definitions"
+
+  # ---------------------------------------------------------
+  #  Infrastructure-as-Code (Terraform, Bicep, etc.)
+  # ---------------------------------------------------------
+  - name: acme-terraform
+    path: "C:\\Repos\\acme-terraform"
+    type: infrastructure
+    platform: terraform
+    branches:
+      - main
+    description: "Terraform infrastructure layers"
+
+  # ---------------------------------------------------------
+  #  Helm charts / Kubernetes manifests
+  # ---------------------------------------------------------
+  - name: acme-helm-charts
+    path: "C:\\Repos\\acme-helm-charts"
+    type: mixed
+    platform: helm
+    branches:
+      - main
+    description: "Helm charts and deployment artifacts"
+
+  # ---------------------------------------------------------
+  #  Monitoring / SRE tooling (optional)
+  # ---------------------------------------------------------
+  - name: acme-monitoring
+    path: "C:\\Repos\\acme-monitoring"
+    type: monitoring
+    platform: mixed
+    branches:
+      - main
+    description: "Monitoring dashboards, alerts, runbooks"
+
+# Default branch used when no branch is specified in a query
+default_branch: main
+
+# Sync settings — controls the background watcher
+sync:
+  interval_seconds: 300       # Re-check every 5 minutes
+  watch_enabled: true          # Enable filesystem watcher
+  auto_ingest: true            # Auto-ingest on detected changes
+
+# Discovery settings — auto-detect patterns in your repos
+discovery:
+  detect_naming_conventions: true
+  detect_secret_patterns: true
+  min_confidence: 0.7          # Minimum confidence for pattern detection
+
+# ---------------------------------------------------------
+#  Notes:
+#  - Repos must be cloned locally. HiveMind reads from disk.
+#  - Path must point to the repo root (where .git/ lives).
+#  - Supported types: cicd, infrastructure, mixed, monitoring
+#  - Supported platforms: harness, terraform, helm, github_actions, mixed
+#  - Branches: list the branches you want indexed.
+# ---------------------------------------------------------

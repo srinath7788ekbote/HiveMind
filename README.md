@@ -60,7 +60,15 @@ This creates a Python venv, installs dependencies, and builds the VS Code extens
 
 ### 2. Configure Your Client
 
-Create a client config at `clients/<your-client>/repos.yaml`:
+Copy the included example template and edit it:
+
+```bat
+mkdir clients\acme
+copy clients\_example\repos.yaml clients\acme\repos.yaml
+echo acme > memory\active_client.txt
+```
+
+Then edit `clients/acme/repos.yaml` with your actual repos:
 
 ```yaml
 client_name: acme
@@ -243,7 +251,9 @@ HiveMind/
 │       ├── diff-branches/SKILL.md
 │       └── list-branches/SKILL.md
 ├── clients/                          # Client configurations
-│   └── <your-client>/
+│   ├── _example/                     #   Tracked template (copy this)
+│   │   └── repos.yaml                #   Example client config
+│   └── <your-client>/                #   Your actual client (gitignored)
 │       └── repos.yaml
 ├── tools/                            # Python tools (invoked by agents)
 │   ├── query_memory.py               #   Semantic search (ChromaDB/JSON)
@@ -301,6 +311,7 @@ HiveMind/
 │   ├── tsconfig.json
 │   └── src/extension.ts
 ├── memory/                           # Generated at runtime (gitignored)
+│   └── README.md                     #   Explains runtime data structure
 ├── setup.bat                         # One-time setup
 ├── install_extension.bat             # Package & install extension
 ├── start_hivemind.bat                # Start background watcher

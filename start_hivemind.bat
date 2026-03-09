@@ -36,10 +36,21 @@ if exist .venv\Scripts\activate.bat (
     call .venv\Scripts\activate.bat
 )
 
-REM --- Read active client (default: dfin) ---
-set CLIENT=dfin
+REM --- Read active client ---
+set CLIENT=
 if exist memory\active_client.txt (
     set /p CLIENT=<memory\active_client.txt
+)
+if "%CLIENT%"=="" (
+    echo ERROR: No active client configured.
+    echo.
+    echo   To get started:
+    echo     1. Copy clients\_example\ to clients\your-client\
+    echo     2. Edit clients\your-client\repos.yaml with your repos
+    echo     3. Run: echo your-client ^> memory\active_client.txt
+    echo     4. Re-run start_hivemind.bat
+    echo.
+    exit /b 1
 )
 
 REM --- Run initial ingest ---
