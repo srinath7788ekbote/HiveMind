@@ -1,0 +1,21 @@
+environment:
+  name: Dev
+  identifier: dev
+  orgIdentifier: default
+  projectIdentifier: eastwood
+  type: PreProduction
+  tags:
+    tier: integration
+  variables:
+    - name: cluster
+      type: String
+      value: aks-eastwood-dev
+    - name: namespace
+      type: String
+      value: audit-dev
+    - name: replicas
+      type: Number
+      value: 1
+  overrides:
+    manifests: []
+    configFiles: []

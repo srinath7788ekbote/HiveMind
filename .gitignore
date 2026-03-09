@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# ============================================
+# SENSITIVE — Client data (repos, secrets, profiles)
+# ============================================
+clients/
+memory/
+*.db
+
+# ============================================
+# VS Code extension build artifacts
+# ============================================
+vscode-extension/node_modules/
+vscode-extension/out/
+vscode-extension/*.vsix
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Cloned repos (if stored locally)
+repos/
+
+# Logs
+*.log
+
+# Test cache
+.pytest_cache/

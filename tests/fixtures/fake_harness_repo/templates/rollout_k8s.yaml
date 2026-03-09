@@ -1,0 +1,22 @@
+template:
+  name: Rollout K8s
+  identifier: rollout_k8s
+  versionLabel: v1.0
+  type: Step
+  projectIdentifier: eastwood
+  orgIdentifier: default
+  tags: {}
+  spec:
+    type: K8sRollingDeploy
+    timeout: 10m
+    spec:
+      skipDryRun: false
+      pruningEnabled: true
+    when:
+      stageStatus: Success
+    failureStrategies:
+      - onFailure:
+          errors:
+            - AllErrors
+          action:
+            type: StageRollback

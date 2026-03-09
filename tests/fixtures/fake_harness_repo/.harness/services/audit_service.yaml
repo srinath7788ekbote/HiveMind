@@ -1,0 +1,40 @@
+service:
+  name: Audit Service
+  identifier: audit_service
+  orgIdentifier: default
+  projectIdentifier: eastwood
+  serviceDefinition:
+    type: Kubernetes
+    spec:
+      manifests:
+        - manifest:
+            identifier: audit_manifests
+            type: HelmChart
+            spec:
+              store:
+                type: Git
+                spec:
+                  connectorRef: github_connector
+                  repoName: Eastwood-helm
+                  branch: main
+                  folderPath: charts/audit-service
+              chartName: audit-service
+              chartVersion: <+input>
+              helmVersion: V3
+      artifacts:
+        - primary:
+            primaryArtifactRef: audit_image
+            sources:
+              - spec:
+                  connectorRef: acr_connector
+                  imagePath: eastwood/audit-service
+                  tag: <+input>
+                type: Acr
+                identifier: audit_image
+      variables:
+        - name: namespace
+          type: String
+          value: audit
+        - name: replicas
+          type: Number
+          value: 2

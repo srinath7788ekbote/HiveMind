@@ -1,0 +1,51 @@
+replicaCount: 2
+
+image:
+  repository: eastwood.azurecr.io/audit-service
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+service:
+  type: ClusterIP
+  port: 8080
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+
+env:
+  - name: ASPNETCORE_ENVIRONMENT
+    value: "Production"
+  - name: DB_CONNECTION_STRING
+    valueFrom:
+      secretKeyRef:
+        name: audit-db-secret
+        key: connection_string
+  - name: APP_INSIGHTS_KEY
+    valueFrom:
+      secretKeyRef:
+        name: app-insights-secret
+        key: instrumentation_key
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: audit-service.eastwood.internal
+      paths:
+        - path: /
+          pathType: Prefix
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70

@@ -1,0 +1,13 @@
+apiVersion: v2
+name: audit-service
+description: Helm chart for the Audit Service
+type: application
+version: 1.2.0
+appVersion: "2.1.0"
+maintainers:
+  - name: SRE Team
+    email: sre@eastwood.internal
+dependencies:
+  - name: common
+    version: "1.x.x"
+    repository: "https://charts.internal.eastwood.com"

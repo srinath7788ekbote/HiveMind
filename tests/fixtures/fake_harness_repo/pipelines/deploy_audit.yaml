@@ -1,0 +1,95 @@
+pipeline:
+  name: Deploy Audit Service
+  identifier: deploy_audit_service
+  projectIdentifier: eastwood
+  orgIdentifier: default
+  tags: {}
+  stages:
+    - stage:
+        name: Deploy to Dev
+        identifier: deploy_to_dev
+        type: Deployment
+        spec:
+          deploymentType: Kubernetes
+          service:
+            serviceRef: audit_service
+          environment:
+            environmentRef: dev
+            deployToAll: false
+            infrastructureDefinitions:
+              - identifier: k8s_dev
+          execution:
+            steps:
+              - step:
+                  name: Rollout Deployment
+                  identifier: rollout
+                  type: K8sRollingDeploy
+                  timeout: 10m
+                  spec:
+                    skipDryRun: false
+            rollbackSteps:
+              - step:
+                  name: Rollback
+                  identifier: rollback
+                  type: K8sRollingRollback
+                  timeout: 10m
+    - stage:
+        name: Deploy to Staging
+        identifier: deploy_to_staging
+        type: Deployment
+        spec:
+          deploymentType: Kubernetes
+          service:
+            serviceRef: audit_service
+          environment:
+            environmentRef: staging
+            deployToAll: false
+            infrastructureDefinitions:
+              - identifier: k8s_staging
+          execution:
+            steps:
+              - step:
+                  name: Rollout Deployment
+                  identifier: rollout_staging
+                  type: K8sRollingDeploy
+                  timeout: 10m
+                  spec:
+                    skipDryRun: false
+    - stage:
+        name: Approval Gate
+        identifier: approval_gate
+        type: Approval
+        spec:
+          approvalType: HarnessApproval
+          approvers:
+            userGroups:
+              - sre_team
+    - stage:
+        name: Deploy to Prod
+        identifier: deploy_to_prod
+        type: Deployment
+        spec:
+          deploymentType: Kubernetes
+          service:
+            serviceRef: audit_service
+          environment:
+            environmentRef: prod
+            deployToAll: false
+            infrastructureDefinitions:
+              - identifier: k8s_prod
+          execution:
+            steps:
+              - step:
+                  name: Rollout Deployment
+                  identifier: rollout_prod
+                  type: K8sRollingDeploy
+                  timeout: 15m
+                  spec:
+                    skipDryRun: false
+  variables:
+    - name: image_tag
+      type: String
+      value: <+input>
+    - name: replicas
+      type: Number
+      value: 2

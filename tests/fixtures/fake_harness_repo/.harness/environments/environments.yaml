@@ -1,0 +1,47 @@
+environment:
+  name: dev
+  identifier: dev
+  orgIdentifier: default
+  projectIdentifier: eastwood
+  type: PreProduction
+  tags:
+    tier: integration
+  variables:
+    - name: cluster
+      type: String
+      value: aks-dev-eastus
+    - name: namespace_prefix
+      type: String
+      value: dev
+---
+environment:
+  name: staging
+  identifier: staging
+  orgIdentifier: default
+  projectIdentifier: eastwood
+  type: PreProduction
+  tags:
+    tier: staging
+  variables:
+    - name: cluster
+      type: String
+      value: aks-staging-eastus
+    - name: namespace_prefix
+      type: String
+      value: staging
+---
+environment:
+  name: prod
+  identifier: prod
+  orgIdentifier: default
+  projectIdentifier: eastwood
+  type: Production
+  tags:
+    tier: production
+  variables:
+    - name: cluster
+      type: String
+      value: aks-prod-eastus
+    - name: namespace_prefix
+      type: String
+      value: prod

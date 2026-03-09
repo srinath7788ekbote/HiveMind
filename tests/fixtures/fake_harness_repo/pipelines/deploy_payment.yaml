@@ -1,0 +1,48 @@
+pipeline:
+  name: Deploy Payment Service
+  identifier: deploy_payment_service
+  projectIdentifier: eastwood
+  orgIdentifier: default
+  stages:
+    - stage:
+        name: Deploy to Dev
+        identifier: deploy_to_dev
+        type: Deployment
+        spec:
+          deploymentType: Kubernetes
+          service:
+            serviceRef: payment_service
+          environment:
+            environmentRef: dev
+          execution:
+            steps:
+              - step:
+                  name: Rollout
+                  identifier: rollout_payment
+                  type: K8sRollingDeploy
+                  timeout: 10m
+                  spec:
+                    skipDryRun: false
+    - stage:
+        name: Deploy to Prod
+        identifier: deploy_to_prod
+        type: Deployment
+        spec:
+          deploymentType: Kubernetes
+          service:
+            serviceRef: payment_service
+          environment:
+            environmentRef: prod
+          execution:
+            steps:
+              - step:
+                  name: Template Deploy
+                  identifier: template_deploy
+                  type: Template
+                  spec:
+                    templateRef: rollout_k8s
+                    versionLabel: v1.0
+  variables:
+    - name: image_tag
+      type: String
+      value: <+input>

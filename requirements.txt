@@ -1,0 +1,8 @@
+# HiveMind Python Dependencies
+# Install: pip install -r requirements.txt
+
+pyyaml>=6.0
+
+# Optional: ChromaDB for vector search (requires Python <3.14)
+# Falls back to JSON keyword search if unavailable.
+# chromadb>=1.5

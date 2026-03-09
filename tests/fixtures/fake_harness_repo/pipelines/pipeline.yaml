@@ -1,0 +1,46 @@
+pipeline:
+  name: Deploy Audit Pipeline
+  identifier: deploy_audit_pipeline
+  projectIdentifier: eastwood
+  orgIdentifier: default
+  stages:
+    - stage:
+        name: Deploy to Dev
+        identifier: deploy_dev
+        type: Deployment
+        spec:
+          deploymentType: Kubernetes
+          service:
+            serviceRef: audit_service
+          environment:
+            environmentRef: dev
+          execution:
+            steps:
+              - step:
+                  name: Rollout
+                  identifier: rollout_step
+                  type: Template
+                  spec:
+                    templateRef: rollout_k8s
+                    versionLabel: v1.0
+    - stage:
+        name: Deploy to Prod
+        identifier: deploy_prod
+        type: Deployment
+        spec:
+          deploymentType: Kubernetes
+          service:
+            serviceRef: audit_service
+          environment:
+            environmentRef: prod
+          execution:
+            steps:
+              - step:
+                  name: Rollout Prod
+                  identifier: rollout_prod
+                  type: K8sRollingDeploy
+                  timeout: 10m
+  variables:
+    - name: image_tag
+      type: String
+      value: <+input>

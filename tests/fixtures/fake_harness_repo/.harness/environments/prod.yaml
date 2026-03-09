@@ -1,0 +1,21 @@
+environment:
+  name: Prod
+  identifier: prod
+  orgIdentifier: default
+  projectIdentifier: eastwood
+  type: Production
+  tags:
+    tier: production
+  variables:
+    - name: cluster
+      type: String
+      value: aks-eastwood-prod
+    - name: namespace
+      type: String
+      value: audit-prod
+    - name: replicas
+      type: Number
+      value: 3
+  overrides:
+    manifests: []
+    configFiles: []
