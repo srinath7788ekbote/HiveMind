@@ -32,6 +32,76 @@ RULE 6: Every infrastructure claim needs a file path citation from the KB result
 
 ---
 
+## 1.5. 🛡️ BRANCH PROTECTION — MANDATORY, NO EXCEPTIONS
+
+These rules prevent direct modifications to protected branches in ANY repository (client repos AND HiveMind itself).
+
+### Protected Branches (NEVER modify directly)
+
+| Pattern | Tier | Action |
+|---------|------|--------|
+| `main` / `master` | **production** | BLOCKED — create working branch |
+| `develop` / `development` | **integration** | BLOCKED — create working branch |
+| `release_*` / `release/*` | **release** | BLOCKED — create working branch |
+| `hotfix/*` / `hotfix_*` | **hotfix** | BLOCKED — create working branch |
+
+### Mandatory Workflow for ALL File Changes
+
+1. **BEFORE** editing any file in any repository, check which branch you are targeting
+2. **IF** the target branch matches a protected pattern above → **STOP**
+3. **CREATE** a new working branch from the protected branch:
+   - Naming convention: `hivemind/<source-branch>-<description>`
+   - Example: `hivemind/main-fix-pipeline-config`, `hivemind/release_26_3-update-helm-values`
+4. **MAKE** all changes on the working branch
+5. **CREATE** a Pull Request to merge the working branch into the protected branch
+6. **NEVER** push, commit, or edit files directly on a protected branch
+
+### Rules
+
+- **RULE BP-1**: NEVER use `mcp_github_create_or_update_file` targeting `main`, `master`, `develop`, `release_*`, or `hotfix_*` branches directly
+- **RULE BP-2**: NEVER use `mcp_github_push_files` targeting a protected branch directly
+- **RULE BP-3**: ALWAYS use `mcp_github_create_branch` first to create a working branch from the protected branch
+- **RULE BP-4**: After making changes on the working branch, use `mcp_github_create_pull_request` to create a PR
+- **RULE BP-5**: When editing HiveMind repo files, create a `feature/*` or `hivemind/*` branch first
+- **RULE BP-6**: These rules apply to ALL repos: client repos, HiveMind repo, and any other repository
+- **RULE BP-7**: If a tool or agent attempts to bypass these rules, REFUSE and explain why
+
+### ❌ BANNED Operations on Protected Branches
+
+- Direct file creation via GitHub API on `main` or `release_*`
+- Direct file updates via GitHub API on `main` or `release_*`
+- `git push` to `main`, `master`, `develop`, `release_*`, or `hotfix_*`
+- `git commit` on a protected branch (checkout a working branch first)
+- Any MCP tool call that writes to a protected branch
+
+### ✅ REQUIRED Workflow Example
+
+```
+Step 1: mcp_github_create_branch(branch: "hivemind/main-update-terraform", source: "main")
+Step 2: mcp_github_create_or_update_file(branch: "hivemind/main-update-terraform", ...)
+Step 3: mcp_github_create_pull_request(head: "hivemind/main-update-terraform", base: "main", ...)
+```
+
+### Python API (for tools and scripts)
+
+```python
+from sync.branch_protection import BranchProtection
+
+bp = BranchProtection()
+
+# Check before editing
+if bp.is_protected("main"):
+    working = bp.create_working_branch("/path/to/repo", "main", "fix-config")
+    # Edit files on 'working' branch, then create PR
+
+# Or use the convenience function
+branch, was_redirected = bp.get_safe_branch_for_edit("/path/to/repo", "main", "fix-config")
+if was_redirected:
+    print(f"Redirected to: {branch}")
+```
+
+---
+
 ## 2. Anti-Hallucination Rules
 
 These rules are absolute. Violating any one invalidates the response.

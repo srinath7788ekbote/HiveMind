@@ -82,6 +82,14 @@ Security Agent
   File: {exact file path}
 ```
 
+## 🛡️ Branch Protection
+
+When recommending fixes to RBAC, secrets, or identity configurations:
+
+- **NEVER** propose direct edits to files on `main`, `master`, `develop`, `release_*`, or `hotfix_*` branches
+- **ALWAYS** instruct to create a working branch first: `hivemind/<source-branch>-<description>`
+- **ALWAYS** recommend changes via Pull Request
+
 ## Anti-Hallucination
 
 - Every secret claim MUST trace the full chain with all 3 file paths (KV -> K8s -> Helm)

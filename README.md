@@ -1,146 +1,151 @@
 # HiveMind — Local SRE Assistant
 
-A local-first SRE assistant that uses GitHub Copilot Chat to answer questions about your infrastructure, pipelines, secrets, and services. No external AI APIs — the only AI is GitHub Copilot, already running in your VS Code.
+A local-first SRE knowledge assistant powered by GitHub Copilot Chat. Index your infrastructure repos (Terraform, Harness, Helm) and query them through specialist AI agents — no external APIs, no cloud dependencies.
 
-## Architecture
+---
+
+## How It Works
+
+HiveMind sits between your repos and GitHub Copilot. It ingests your infrastructure code, builds a knowledge graph, and gives Copilot the context it needs to answer real questions about **your** environment.
 
 ```
-┌──────────────────────────────────────────────────────┐
-│  VS Code — GitHub Copilot Chat                        │
-│  @hivemind participant + native multi-agent            │
-│    ├── slash commands (/ingest, /status, /impact ...) │
-│    ├── agent dropdown (Team Lead, DevOps, Architect..)│
-│    └── copilot-instructions.md (auto-loaded context)  │
-└───────────────┬──────────────────────────────────────┘
-                │ Native Copilot Enterprise agents
-┌───────────────▼──────────────────────────────────────┐
-│  .github/agents/*.agent.md (7 specialist agents)      │
-│    hivemind-team-lead -> devops, architect, security, │
-│                          investigator, analyst, planner│
-│    YAML frontmatter: name, tools, handoffs             │
-│    Native handoffs (no custom AgentBus needed)          │
-└───────────────┬──────────────────────────────────────┘
-                │ Agents invoke skills
-┌───────────────▼──────────────────────────────────────┐
-│  .github/skills/*/SKILL.md (9 tool skills)            │
-│    query-memory, query-graph, get-entity, search-files│
-│    get-pipeline, get-secret-flow, impact-analysis     │
-│    diff-branches, list-branches                        │
-└───────────────┬──────────────────────────────────────┘
-                │ child_process (Python)
-┌───────────────▼──────────────────────────────────────┐
-│  Tools                                                │
-│    query_memory.py — semantic search (ChromaDB/JSON)   │
-│    query_graph.py  — BFS graph traversal (SQLite)      │
-│    get_entity.py   — entity lookup                     │
-│    search_files.py — file search                       │
-│    get_pipeline.py — deep pipeline YAML parser          │
-│    get_secret_flow.py — secret lifecycle tracer         │
-│    impact_analysis.py — blast radius assessment         │
-│    diff_branches.py — branch comparison                 │
-│    list_branches.py — branch listing                    │
-│    set_client.py   — client context switcher            │
-└───────────────┬──────────────────────────────────────┘
-                │
-┌───────────────▼──────────────────────────────────────┐
-│  Ingest Pipeline                                      │
-│    crawl_repos -> classify_files -> extract_relations  │
-│    -> embed_chunks -> branch_indexer                   │
-│    discovery/ (services, environments, pipelines,      │
-│               infra_layers, secrets, naming, profiles)  │
-└───────────────┬──────────────────────────────────────┘
-                │
-┌───────────────▼──────────────────────────────────────┐
-│  Memory                                               │
-│    memory/graph.db          — SQLite entity graph       │
-│    memory/chunks/           — ChromaDB or JSON chunks   │
-│    memory/entities.json     — entity catalog             │
-│    memory/branch_index.json — branch tier tracking       │
-└──────────────────────────────────────────────────────┘
+  Your Repos (Terraform, Harness, Helm, K8s)
+       │
+       ▼
+  ┌─────────────┐
+  │  Ingest      │  crawl → classify → extract relationships → embed
+  └──────┬──────┘
+         ▼
+  ┌─────────────┐
+  │  Memory      │  Entity graph (SQLite) + vector chunks (ChromaDB/JSON)
+  └──────┬──────┘
+         ▼
+  ┌─────────────┐
+  │  Tools       │  10 Python tools: query, search, trace, diff, impact
+  └──────┬──────┘
+         ▼
+  ┌─────────────┐
+  │  Agents      │  7 specialist agents (Team Lead, DevOps, Architect, ...)
+  └──────┬──────┘
+         ▼
+  ┌─────────────┐
+  │  VS Code     │  @hivemind chat participant + Copilot Enterprise agents
+  └─────────────┘
 ```
+
+**Key idea:** You ask a question in Copilot Chat. The Team Lead agent routes it to the right specialist. The specialist queries indexe memory using Python tools and returns an answer grounded in your actual infrastructure — not generic training data.
 
 ## Requirements
 
-- **Python 3.10+** (Windows native)
+- **Python 3.10+** (Windows)
 - **Node.js 18+** (for VS Code extension)
 - **VS Code** with GitHub Copilot Chat
 - **Git** in PATH
 
-Optional:
+Optional (graceful fallbacks exist):
 - **PyYAML** — better YAML parsing (fallback: regex parser)
 - **ChromaDB** — vector search (fallback: JSON keyword search)
 
 ## Quick Start
 
-### 1. Setup
+### 1. Clone and Setup
 
-```bat
+```bash
+git clone <your-hivemind-repo-url>
+cd HiveMind
 setup.bat
 ```
 
-This installs Python and Node.js dependencies, compiles the extension, and creates the memory directory.
+This creates a Python venv, installs dependencies, and builds the VS Code extension.
 
-### 2. Configure Client
+### 2. Configure Your Client
 
-Edit `clients/dfin/repos.yaml` with your repos:
+Create a client config at `clients/<your-client>/repos.yaml`:
 
 ```yaml
-client: dfin
+client_name: acme
+display_name: "Acme Corp"
+
 repos:
-  - name: my-harness-pipelines
-    url: https://github.com/org/my-harness-pipelines.git
-    type: harness
-  - name: my-terraform
-    url: https://github.com/org/my-terraform.git
-    type: terraform
-  - name: my-helm
-    url: https://github.com/org/my-helm.git
-    type: helm
+  - name: acme-harness-pipelines
+    path: "C:\\path\\to\\acme-harness-pipelines"
+    type: cicd
+    platform: harness
+    branches:
+      - main
+      - release_26_3
+    description: "Harness CI/CD pipeline definitions"
+
+  - name: acme-terraform
+    path: "C:\\path\\to\\acme-terraform"
+    type: infrastructure
+    platform: terraform
+    branches:
+      - main
+    description: "Terraform infrastructure layers"
+
+  - name: acme-helm-charts
+    path: "C:\\path\\to\\acme-helm-charts"
+    type: mixed
+    platform: helm
+    branches:
+      - main
+    description: "Helm charts and deployment artifacts"
+
+default_branch: main
+
+sync:
+  interval_seconds: 300
+  watch_enabled: true
+  auto_ingest: true
+
+discovery:
+  detect_naming_conventions: true
+  detect_secret_patterns: true
+  min_confidence: 0.7
 ```
 
-### 3. Install Extension
+> **Note:** Repos must be cloned locally. HiveMind reads from disk — it doesn't clone for you.
+
+### 3. Install the VS Code Extension
 
 ```bat
 install_extension.bat
 ```
 
-### 4. Start Background Watcher
+### 4. Start HiveMind
 
 ```bat
 start_hivemind.bat
 ```
 
-This runs the initial ingest and starts the file watcher daemon.
+This runs the initial ingest (crawl, classify, extract, embed) and starts a background watcher that re-indexes on changes.
 
-### 5. Use in VS Code
+### 5. Ask Questions
 
-Open Copilot Chat and use any of these methods:
-
-**Quick commands via @hivemind:**
+Open Copilot Chat in VS Code:
 
 ```
 @hivemind What pipelines deploy audit-service?
 @hivemind /impact deploy_audit.yaml
-@hivemind /secrets automation-dev-dbauditservice
-@hivemind /pipeline deploy_audit.yaml
+@hivemind /secrets my-service-db-connection
+@hivemind /pipeline deploy_my_service.yaml
 @hivemind /status
-@hivemind /diff develop release_26_1
+@hivemind /diff develop release_26_3
 @hivemind /branches
 ```
 
-**Native agent dropdown (Copilot Enterprise):**
+Or use the **agent dropdown** (Copilot Enterprise) to talk directly to a specialist:
 
-Click the agent dropdown in Copilot Chat and select a specialist:
-
-| Agent | When to use |
-|-------|-------------|
-| **hivemind-team-lead** | General questions — routes to specialists |
-| **hivemind-devops** | Pipeline, Helm, deployment questions |
-| **hivemind-architect** | Terraform, infrastructure, naming |
-| **hivemind-security** | Secrets, RBAC, managed identities |
-| **hivemind-investigator** | Root cause analysis, incidents |
-| **hivemind-analyst** | Impact analysis, blast radius |
-| **hivemind-planner** | Runbooks, migration plans |
+| Agent | Use for |
+|-------|---------|
+| **hivemind-team-lead** | General questions — auto-routes to specialists |
+| **hivemind-devops** | Pipelines, Helm, deployments, rollouts |
+| **hivemind-architect** | Terraform, infra layers, resource naming |
+| **hivemind-security** | Secrets, RBAC, managed identities, Key Vault |
+| **hivemind-investigator** | Root cause analysis, incident tracing |
+| **hivemind-analyst** | Impact analysis, blast radius, change risk |
+| **hivemind-planner** | Runbooks, migration plans, step-by-step procedures |
 
 Agents hand off to each other automatically when cross-domain expertise is needed.
 
@@ -161,7 +166,7 @@ Agents hand off to each other automatically when cross-domain expertise is neede
 
 Agents are defined in `.github/agents/*.agent.md` and auto-detected by GitHub Copilot Enterprise.
 
-| Agent                 | Role                    | Handoffs to           |
+| Agent                 | Role                    | Hands off to          |
 |-----------------------|-------------------------|-----------------------|
 | hivemind-team-lead    | Orchestrator / Router   | All specialist agents |
 | hivemind-devops       | CI/CD Specialist        | Security, Architect, Investigator |
@@ -171,13 +176,55 @@ Agents are defined in `.github/agents/*.agent.md` and auto-detected by GitHub Co
 | hivemind-analyst      | Impact / Blast Radius   | Planner               |
 | hivemind-planner      | Runbooks / Procedures   | DevOps, Architect, Security |
 
+## Branch Protection
+
+HiveMind enforces branch protection rules to prevent direct modifications to critical branches — in client repos AND in HiveMind itself.
+
+### Protected Branches
+
+| Pattern | Tier | Direct Edit |
+|---------|------|-------------|
+| `main` / `master` | production | **BLOCKED** |
+| `develop` / `development` | integration | **BLOCKED** |
+| `release_*` / `release/*` | release | **BLOCKED** |
+| `hotfix_*` / `hotfix/*` | hotfix | **BLOCKED** |
+| `feature/*` / `feat/*` / `fix/*` | working | Allowed |
+| `hivemind/*` | working (auto) | Allowed |
+| Any other branch | unclassified | Allowed |
+
+### Required Workflow
+
+When targeting a protected branch:
+
+1. **Create** a working branch (e.g., `hivemind/main-fix-config`)
+2. **Make** all changes on the working branch
+3. **Create** a Pull Request to merge back
+
+### Enforcement Layers
+
+- **Copilot instructions** (`copilot-instructions.md`) — blocks MCP GitHub tools from writing to protected branches
+- **Agent rules** — all 7 agents include branch protection directives
+- **Python API** (`sync/branch_protection.py`) — programmatic validation for scripts and tools
+
+```python
+from sync.branch_protection import BranchProtection
+
+bp = BranchProtection()
+bp.is_protected("main")           # True
+bp.is_protected("feat/my-work")   # False
+
+# Auto-redirect: creates working branch if target is protected
+branch, redirected = bp.get_safe_branch_for_edit("/path/to/repo", "main", "fix-config")
+# branch = "hivemind/main-fix-config", redirected = True
+```
+
 ## Directory Structure
 
 ```
 HiveMind/
 ├── .github/
-│   ├── copilot-instructions.md     # Auto-loaded system prompt
-│   ├── agents/                      # Native Copilot Enterprise agents
+│   ├── copilot-instructions.md      # Auto-loaded system prompt
+│   ├── agents/                       # Copilot Enterprise agents
 │   │   ├── hivemind-team-lead.agent.md
 │   │   ├── hivemind-devops.agent.md
 │   │   ├── hivemind-architect.agent.md
@@ -185,7 +232,7 @@ HiveMind/
 │   │   ├── hivemind-investigator.agent.md
 │   │   ├── hivemind-analyst.agent.md
 │   │   └── hivemind-planner.agent.md
-│   └── skills/                      # On-demand tool skills
+│   └── skills/                       # On-demand tool skills
 │       ├── query-memory/SKILL.md
 │       ├── query-graph/SKILL.md
 │       ├── get-entity/SKILL.md
@@ -195,73 +242,72 @@ HiveMind/
 │       ├── impact-analysis/SKILL.md
 │       ├── diff-branches/SKILL.md
 │       └── list-branches/SKILL.md
-├── clients/                        # Client configurations
-│   └── dfin/
+├── clients/                          # Client configurations
+│   └── <your-client>/
 │       └── repos.yaml
-├── tools/                          # Python tools
-│   ├── query_memory.py
-│   ├── query_graph.py
-│   ├── get_entity.py
-│   ├── search_files.py
-│   ├── get_pipeline.py
-│   ├── get_secret_flow.py
-│   ├── impact_analysis.py
-│   ├── diff_branches.py
-│   ├── list_branches.py
-│   └── set_client.py
-├── ingest/                         # Ingest pipeline
-│   ├── crawl_repos.py
-│   ├── classify_files.py
-│   ├── extract_relationships.py
-│   ├── branch_indexer.py
-│   ├── embed_chunks.py
-│   └── discovery/
-│       ├── __init__.py
-│       ├── discover_repo_type.py
+├── tools/                            # Python tools (invoked by agents)
+│   ├── query_memory.py               #   Semantic search (ChromaDB/JSON)
+│   ├── query_graph.py                #   BFS graph traversal (SQLite)
+│   ├── get_entity.py                 #   Entity detail lookup
+│   ├── search_files.py               #   File pattern search
+│   ├── get_pipeline.py               #   Pipeline YAML deep parser
+│   ├── get_secret_flow.py            #   Secret lifecycle tracer
+│   ├── impact_analysis.py            #   Blast radius assessment
+│   ├── diff_branches.py              #   Branch diff comparison
+│   ├── list_branches.py              #   Branch listing with tiers
+│   └── set_client.py                 #   Client context switcher
+├── ingest/                           # Ingest pipeline
+│   ├── crawl_repos.py                #   Main orchestrator
+│   ├── classify_files.py             #   File type classification
+│   ├── extract_relationships.py      #   Entity relationship extraction
+│   ├── branch_indexer.py             #   Branch tier tracking
+│   ├── embed_chunks.py               #   Chunk embedding
+│   └── discovery/                    #   Auto-discovery modules
 │       ├── discover_services.py
 │       ├── discover_environments.py
 │       ├── discover_pipelines.py
 │       ├── discover_infra_layers.py
 │       ├── discover_secrets.py
 │       ├── discover_naming.py
+│       ├── discover_repo_type.py
 │       └── build_profile.py
-├── sync/                           # Background sync
-│   ├── git_utils.py
-│   ├── incremental_sync.py
-│   └── watch_repos.py
-├── tests/                          # Test suite
+├── sync/                             # Background sync & safety
+│   ├── git_utils.py                  #   Git operations
+│   ├── branch_protection.py          #   Branch protection engine
+│   ├── incremental_sync.py           #   Incremental re-indexing
+│   └── watch_repos.py                #   Background watcher daemon
+├── tests/                            # Test suite (unittest)
 │   ├── conftest.py
+│   ├── test_branch_protection.py
+│   ├── test_branch_awareness.py
+│   ├── test_query_memory.py
+│   ├── test_query_graph.py
+│   ├── test_get_entity.py
+│   ├── test_get_pipeline.py
+│   ├── test_search_files.py
+│   ├── test_impact_analysis.py
+│   ├── test_secret_flow.py
+│   ├── test_diff_branches.py
+│   ├── test_list_branches.py
+│   ├── test_set_client.py
 │   ├── test_discovery.py
 │   ├── test_classify.py
 │   ├── test_relationships.py
-│   ├── test_query_memory.py
-│   ├── test_query_graph.py
-│   ├── test_impact_analysis.py
-│   ├── test_secret_flow.py
 │   ├── test_agent_files.py
 │   ├── test_full_ingest.py
-│   ├── test_branch_awareness.py
-│   └── fixtures/
-│       ├── fake_harness_repo/
-│       ├── fake_terraform_repo/
-│       └── fake_helm_repo/
-├── vscode-extension/               # VS Code extension
+│   └── fixtures/                     #   Fake repos for testing
+├── vscode-extension/                 # VS Code extension
 │   ├── package.json
 │   ├── tsconfig.json
-│   └── src/
-│       └── extension.ts
-├── memory/                         # Generated at runtime
-│   ├── graph.db
-│   ├── chunks/
-│   ├── entities.json
-│   └── branch_index.json
-├── run_all_tests.py                # Test runner
-├── run_all_tests.bat               # Test runner (Windows)
-├── setup.bat                       # One-time setup
-├── install_extension.bat           # Package & install extension
-├── start_hivemind.bat              # Start background watcher
-├── stop_hivemind.bat               # Stop background watcher
-├── README.md                       # This file
+│   └── src/extension.ts
+├── memory/                           # Generated at runtime (gitignored)
+├── setup.bat                         # One-time setup
+├── install_extension.bat             # Package & install extension
+├── start_hivemind.bat                # Start background watcher
+├── stop_hivemind.bat                 # Stop background watcher
+├── run_all_tests.bat                 # Test runner
+├── run_all_tests.py                  # Test runner (Python)
+├── requirements.txt
 └── .gitignore
 ```
 
@@ -269,30 +315,62 @@ HiveMind/
 
 ```bat
 run_all_tests.bat              # All tests
-run_all_tests.bat --unit       # Unit tests only
-run_all_tests.bat --integration # Integration tests only
 run_all_tests.bat --verbose    # Verbose output
 ```
 
 Or directly:
 
-```
+```bash
 python run_all_tests.py
+python -m unittest tests.test_branch_protection -v   # Single test module
 ```
 
 ## Design Principles
 
 1. **Local-first** — No cloud APIs, no paid services, no telemetry
-2. **Copilot-only AI** — GitHub Copilot Chat is the sole LLM
-3. **Native multi-agent** — Specialist agents via Copilot Enterprise `.agent.md` files with native handoffs
+2. **Copilot-only AI** — GitHub Copilot Chat is the sole LLM; no OpenAI keys needed
+3. **Native multi-agent** — Specialist agents via Copilot Enterprise `.agent.md` with native handoffs
 4. **Branch-aware** — All queries respect branch context and tier classification
-5. **Graceful degradation** — ChromaDB -> JSON, PyYAML -> regex, Git -> file scan
-6. **Zero-config** — Works with `setup.bat` and `start_hivemind.bat`
+5. **Branch-protected** — Protected branches require working branch + PR; no direct edits
+6. **Graceful degradation** — ChromaDB → JSON, PyYAML → regex, Git → file scan
+7. **Zero-config** — `setup.bat` + `start_hivemind.bat` and you're running
+
+## Contributing
+
+1. **Create a working branch** from `main`:
+   ```bash
+   git checkout -b feature/your-change main
+   ```
+2. **Make your changes** — follow existing code patterns and naming conventions
+3. **Add tests** — every new module should have a corresponding `test_*.py`
+4. **Run the test suite**:
+   ```bash
+   python run_all_tests.py
+   ```
+5. **Commit and push** your working branch
+6. **Open a Pull Request** to `main` with a clear description
+
+### Guidelines
+
+- Python tools go in `tools/`, ingest modules in `ingest/`, sync utilities in `sync/`
+- Agent definitions go in `.github/agents/*.agent.md`
+- Skill definitions go in `.github/skills/*/SKILL.md`
+- Tests use `unittest` (no pytest dependency) — see `tests/conftest.py` for shared fixtures
+- Never commit client data (`clients/`, `memory/`) — these are gitignored
+- **Never push directly to `main`, `develop`, or `release_*`** — use a working branch
+
+## Roadmap
+
+- [ ] **Multi-platform support** — Linux/macOS shell scripts alongside `.bat`
+- [ ] **GitHub Actions integration** — CI pipeline for automated testing
+- [ ] **PR-aware indexing** — auto-index open PRs and compare against base branch
+- [ ] **Incident correlation** — link alerts/incidents to infrastructure changes
+- [ ] **Cost analysis agent** — new specialist agent for Azure cost optimization
+- [ ] **Web dashboard** — lightweight status page for indexed repos and branch health
+- [ ] **Multi-client switching** — seamless hot-switching between client contexts
 
 ## Stopping HiveMind
 
 ```bat
 stop_hivemind.bat
 ```
-
-This kills the background watcher process via its PID file.

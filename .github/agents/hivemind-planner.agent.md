@@ -117,6 +117,17 @@ Estimated Duration: {time estimate}
 Risk Level: {LOW|MEDIUM|HIGH}
 ```
 
+## 🛡️ Branch Protection in Runbooks
+
+Every runbook that involves file modifications MUST include:
+
+1. **Step 0 (MANDATORY)**: Create a working branch from the target protected branch
+   - Branch name: `hivemind/<source-branch>-<description>`
+   - Example: `mcp_github_create_branch(branch: "hivemind/main-update-config", source: "main")`
+2. **Final Step**: Create a Pull Request to merge the working branch into the protected branch
+   - Example: `mcp_github_create_pull_request(head: "hivemind/main-update-config", base: "main")`
+3. **NEVER** include steps that directly edit files on `main`, `master`, `develop`, `release_*`, or `hotfix_*`
+
 ## Anti-Hallucination
 
 - Every step MUST reference a real file or resource from the knowledge base
