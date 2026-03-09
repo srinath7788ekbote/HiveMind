@@ -77,6 +77,14 @@ Architect Agent
   Finding: {what was found}
 ```
 
+## 🛡️ Branch Protection
+
+When recommending infrastructure changes:
+
+- **NEVER** propose direct edits to `.tf` files on `main`, `master`, `develop`, `release_*`, or `hotfix_*` branches
+- **ALWAYS** instruct to create a working branch first: `hivemind/<source-branch>-<description>`
+- **ALWAYS** recommend Terraform changes via Pull Request
+
 ## Anti-Hallucination
 
 - Every infrastructure claim MUST cite a `.tf` file path

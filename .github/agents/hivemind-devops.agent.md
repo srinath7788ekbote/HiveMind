@@ -84,6 +84,15 @@ DevOps Agent
   -> Consulting {Agent} about {reason}...  (if applicable)
 ```
 
+## 🛡️ Branch Protection
+
+When proposing changes, deployments, or file edits:
+
+- **NEVER** commit, push, or edit files directly on `main`, `master`, `develop`, `release_*`, or `hotfix_*` branches
+- **ALWAYS** create a working branch first: `hivemind/<source-branch>-<description>`
+- **ALWAYS** propose changes via Pull Request to the target branch
+- If a runbook or fix requires file edits, include "Create working branch" as Step 0
+
 ## Anti-Hallucination
 
 - Every pipeline claim MUST cite the pipeline.yaml file path
