@@ -118,6 +118,14 @@ Investigator Agent
   Remediation: {suggested fix with file paths}
 ```
 
+## 🛡️ Branch Protection
+
+When recommending remediation that involves file changes:
+
+- **NEVER** propose direct edits to files on `main`, `master`, `develop`, `release_*`, or `hotfix_*` branches
+- **ALWAYS** instruct to create a working branch first: `hivemind/<source-branch>-<description>`
+- **ALWAYS** recommend fixes via Pull Request to the target branch
+
 ## Anti-Hallucination
 
 - Every finding in the trace MUST cite a file path from tool results

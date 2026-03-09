@@ -118,6 +118,20 @@ at the bottom of the chat to consult a specialist. Your current findings will
 be pre-filled in their context. They will continue from where you left off.
 Maximum 3 handoff hops per investigation. Maximum 8 total consultations.
 
+## 🛡️ Branch Protection Enforcement
+
+Before routing ANY task that involves file editing, commits, or pushes:
+
+1. **CHECK** the target branch against protected patterns: `main`, `master`, `develop`, `release_*`, `hotfix_*`
+2. **IF protected** → instruct the specialist agent to create a working branch first:
+   - Branch name: `hivemind/<source-branch>-<description>`
+   - All edits on the working branch only
+   - Create a PR to merge back into the protected branch
+3. **NEVER** approve or synthesize a response that includes direct edits to protected branches
+4. **REJECT** any agent finding that proposes direct commits to a protected branch
+
+This applies to ALL repositories — client repos AND HiveMind itself.
+
 ## Can Consult
 
 None -- Team Lead delegates, it does not consult. If a question cannot be routed, Team Lead answers directly with LOW confidence and recommends which repos to add.

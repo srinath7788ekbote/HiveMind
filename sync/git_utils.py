@@ -142,3 +142,61 @@ def get_last_commit_time(repo_path: str, branch: str = "HEAD") -> str:
     """Get the timestamp of the last commit."""
     code, stdout, _ = run_git(repo_path, ["log", "-1", "--format=%ci", branch])
     return stdout if code == 0 else ""
+
+
+def checkout_branch(repo_path: str, branch: str, create: bool = False) -> bool:
+    """
+    Checkout a branch, optionally creating it.
+
+    Args:
+        repo_path: Absolute path to the repo.
+        branch: Branch to checkout.
+        create: If True, create the branch first (git checkout -b).
+
+    Returns:
+        True if successful.
+    """
+    args = ["checkout"]
+    if create:
+        args.append("-b")
+    args.append(branch)
+    code, _, _ = run_git(repo_path, args)
+    return code == 0
+
+
+def create_branch_from(repo_path: str, new_branch: str, source: str) -> bool:
+    """
+    Create a new branch from a source reference.
+
+    Args:
+        repo_path: Absolute path to the repo.
+        new_branch: Name for the new branch.
+        source: Source branch/ref to branch from.
+
+    Returns:
+        True if successful.
+    """
+    code, _, _ = run_git(repo_path, ["checkout", "-b", new_branch, source])
+    return code == 0
+
+
+def get_current_branch(repo_path: str) -> str:
+    """Get the current branch name."""
+    code, stdout, _ = run_git(repo_path, ["branch", "--show-current"])
+    return stdout if code == 0 else ""
+
+
+def push_branch(repo_path: str, branch: str, remote: str = "origin") -> bool:
+    """
+    Push a branch to remote.
+
+    Args:
+        repo_path: Absolute path to the repo.
+        branch: Branch to push.
+        remote: Remote name (default: origin).
+
+    Returns:
+        True if successful.
+    """
+    code, _, _ = run_git(repo_path, ["push", "-u", remote, branch])
+    return code == 0

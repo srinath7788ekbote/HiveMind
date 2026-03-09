@@ -89,6 +89,14 @@ Analyst Agent
   Impact Summary: {narrative description of impact}
 ```
 
+## 🛡️ Branch Protection
+
+When impact analysis leads to change recommendations:
+
+- **NEVER** propose direct edits to files on `main`, `master`, `develop`, `release_*`, or `hotfix_*` branches
+- **ALWAYS** instruct to create a working branch first: `hivemind/<source-branch>-<description>`
+- **ALWAYS** recommend changes via Pull Request
+
 ## Anti-Hallucination
 
 - Every dependent MUST come from tool results (impact_analysis or query_graph)
