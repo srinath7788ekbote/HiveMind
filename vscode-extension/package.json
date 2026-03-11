@@ -104,7 +104,22 @@
         "description": "Runbooks, migration plans, and step-by-step operational procedures.",
         "isSticky": false
       }
-    ]
+    ],
+    "configuration": {
+      "title": "HiveMind",
+      "properties": {
+        "hivemind.projectRoot": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the HiveMind project root (contains memory/, tools/, clients/). Set this to use @hivemind from any workspace."
+        },
+        "hivemind.pythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the Python executable. If empty, HiveMind looks for .venv in the project root, then falls back to system python."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

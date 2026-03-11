@@ -50,9 +50,11 @@ let _projectRoot: string | undefined;
  *
  * Strategy (in order):
  *   1. Return the cached value if already resolved.
- *   2. Walk vscode.workspace.workspaceFolders and pick the first one
+ *   2. Check the VS Code setting `hivemind.projectRoot` — this allows
+ *      @hivemind to work from ANY workspace (e.g., a client repo).
+ *   3. Walk vscode.workspace.workspaceFolders and pick the first one
  *      that contains a "memory" directory (signature of a HiveMind root).
- *   3. Fall back to __dirname-relative resolution (works when running
+ *   4. Fall back to __dirname-relative resolution (works when running
  *      directly from the repo via `npm run watch` + F5 debug).
  */
 function getProjectRoot(): string {
@@ -60,39 +62,58 @@ function getProjectRoot(): string {
     return _projectRoot;
   }
 
-  // Try workspace folders first
+  // 1. Check VS Code setting first — enables @hivemind from any workspace
+  const config = vscode.workspace.getConfiguration('hivemind');
+  const configuredRoot = config.get<string>('projectRoot');
+  if (configuredRoot && configuredRoot.trim()) {
+    const candidate = configuredRoot.trim();
+    if (
+      fs.existsSync(path.join(candidate, "memory")) &&
+      fs.existsSync(path.join(candidate, "tools"))
+    ) {
+      _projectRoot = candidate;
+      console.log(`[HiveMind] getProjectRoot() resolved via setting: ${_projectRoot}`);
+      return _projectRoot;
+    }
+    console.log(`[HiveMind] getProjectRoot() setting points to invalid path: ${candidate}`);
+  }
+
+  // 2. Try workspace folders
   const folders = vscode.workspace.workspaceFolders;
   console.log(`[HiveMind] getProjectRoot() searching ${folders?.length ?? 0} workspace folders`);
   if (folders) {
     for (const folder of folders) {
-      const candidate = folder.uri.fsPath;
-      console.log(`[HiveMind] getProjectRoot() checking candidate: ${candidate}`);
+      const wsCandidate = folder.uri.fsPath;
+      console.log(`[HiveMind] getProjectRoot() checking candidate: ${wsCandidate}`);
       if (
-        fs.existsSync(path.join(candidate, "memory")) &&
-        fs.existsSync(path.join(candidate, "tools"))
+        fs.existsSync(path.join(wsCandidate, "memory")) &&
+        fs.existsSync(path.join(wsCandidate, "tools"))
       ) {
-        _projectRoot = candidate;
+        _projectRoot = wsCandidate;
         console.log(`[HiveMind] getProjectRoot() resolved via memory+tools: ${_projectRoot}`);
         return _projectRoot;
       }
     }
     // If no folder has memory/tools, check if any folder is named HiveMind-ish
     for (const folder of folders) {
-      const candidate = folder.uri.fsPath;
+      const wsCandidate = folder.uri.fsPath;
       if (
-        fs.existsSync(path.join(candidate, ".github", "copilot-instructions.md"))
+        fs.existsSync(path.join(wsCandidate, ".github", "copilot-instructions.md"))
       ) {
-        _projectRoot = candidate;
+        _projectRoot = wsCandidate;
         console.log(`[HiveMind] getProjectRoot() resolved via copilot-instructions: ${_projectRoot}`);
         return _projectRoot;
       }
     }
   }
 
-  // Fallback: __dirname-relative (works during extension development / F5)
-  _projectRoot = path.resolve(__dirname, "..", "..");
-  console.log(`[HiveMind] getProjectRoot() resolved via fallback: ${_projectRoot}`);
-  return _projectRoot;
+  // 3. Fallback: __dirname-relative (works during extension development / F5)
+  //    Do NOT cache this — when installed via VSIX, __dirname points to
+  //    ~/.vscode/extensions/…/out which is wrong. By not caching, we allow
+  //    subsequent calls to re-check workspace folders once they become available.
+  const fallback = path.resolve(__dirname, "..", "..");
+  console.log(`[HiveMind] getProjectRoot() resolved via fallback (NOT cached): ${fallback}`);
+  return fallback;
 }
 
 /**
@@ -268,7 +289,13 @@ function getActiveClient(): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Detect the active client from workspace folder name and write it.
+ * Detect the active client from workspace folder name or opened repo.
+ *
+ * Strategy:
+ *   1. Check workspace folder name against clients/ configs
+ *   2. If workspace is a client repo (e.g., dfin-harness-pipelines),
+ *      cross-reference it against repos.yaml to find the owning client
+ *   3. Fall back to first client found, or workspace name
  */
 function detectAndSetClient(): void {
   const folders = vscode.workspace.workspaceFolders;
@@ -276,21 +303,46 @@ function detectAndSetClient(): void {
     return;
   }
   const rootName = path.basename(folders[0].uri.fsPath).toLowerCase();
+  const rootPath = folders[0].uri.fsPath;
 
   // Check if clients/ has a matching config
   const clientsDir = path.join(getProjectRoot(), "clients");
   if (fs.existsSync(clientsDir)) {
-    const clients = fs.readdirSync(clientsDir);
+    const clients = fs.readdirSync(clientsDir).filter(
+      (c) => fs.statSync(path.join(clientsDir, c)).isDirectory()
+    );
+
+    // Strategy 1: workspace folder name matches a client name
     for (const c of clients) {
       if (rootName.includes(c.toLowerCase())) {
         writeActiveClient(c);
         return;
       }
     }
-  }
-  // Default: use first client found, or workspace name
-  if (fs.existsSync(clientsDir)) {
-    const clients = fs.readdirSync(clientsDir);
+
+    // Strategy 2: workspace is a client repo — check repos.yaml in each client
+    for (const c of clients) {
+      const reposYaml = path.join(clientsDir, c, "repos.yaml");
+      if (fs.existsSync(reposYaml)) {
+        try {
+          const content = fs.readFileSync(reposYaml, "utf-8");
+          // Check if any repo name or path matches the workspace
+          if (
+            content.toLowerCase().includes(rootName) ||
+            content.includes(rootPath.replace(/\\/g, "\\\\")) ||
+            content.includes(rootPath)
+          ) {
+            writeActiveClient(c);
+            console.log(`[HiveMind] detectAndSetClient() matched client '${c}' via repos.yaml for workspace '${rootName}'`);
+            return;
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      }
+    }
+
+    // Strategy 3: fall back to first client found
     if (clients.length > 0) {
       writeActiveClient(clients[0]);
       return;
@@ -857,6 +909,564 @@ function createAgentHandler(
 }
 
 // ---------------------------------------------------------------------------
+// Write Intent Detection & Execution
+// ---------------------------------------------------------------------------
+
+/** Words that signal the user wants to create/modify a file. */
+const WRITE_INTENT_WORDS = [
+  "create", "generate", "write", "add", "modify", "update",
+  "change", "fix", "refactor", "build", "make", "produce",
+];
+
+/**
+ * Detect whether the user's prompt expresses a write intent.
+ * Returns true if the prompt contains words like create, generate, write, etc.
+ */
+function hasWriteIntent(prompt: string): boolean {
+  const lower = prompt.toLowerCase();
+  return WRITE_INTENT_WORDS.some((w) => lower.includes(w));
+}
+
+/**
+ * Extract a target repo from the prompt. Checks against known repos in
+ * the client config, then infers from context keywords.
+ * Falls back to extractRepo() helper.
+ */
+/**
+ * Parse known repos from a client's repos.yaml.
+ */
+interface RepoEntry { name: string; type?: string; platform?: string; path?: string }
+function loadKnownRepos(client: string): RepoEntry[] {
+  const reposYaml = path.join(getProjectRoot(), "clients", client, "repos.yaml");
+  const knownRepos: RepoEntry[] = [];
+  if (!fs.existsSync(reposYaml)) { return knownRepos; }
+  try {
+    const content = fs.readFileSync(reposYaml, "utf-8");
+    const nameMatches = content.match(/name:\s*(.+)/g);
+    const typeMatches = content.match(/type:\s*(.+)/g);
+    const platformMatches = content.match(/platform:\s*(.+)/g);
+    const pathMatches = content.match(/path:\s*["']?(.+?)["']?\s*$/gm);
+    if (nameMatches) {
+      for (let i = 0; i < nameMatches.length; i++) {
+        knownRepos.push({
+          name: nameMatches[i].replace("name:", "").trim(),
+          type: typeMatches?.[i]?.replace("type:", "").trim() || "",
+          platform: platformMatches?.[i]?.replace("platform:", "").trim() || "",
+          path: pathMatches?.[i]?.replace(/path:\s*["']?/, "").replace(/["']?\s*$/, "").trim() || "",
+        });
+      }
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return knownRepos;
+}
+
+/**
+ * Detect the active repo from the user's current workspace folders and active editor.
+ * Cross-references workspace paths against known repo paths in repos.yaml.
+ */
+function detectActiveRepo(client: string): string | null {
+  const knownRepos = loadKnownRepos(client);
+  if (knownRepos.length === 0) { return null; }
+
+  // Normalize paths for comparison
+  const normalize = (p: string) => p.replace(/\\/g, "/").toLowerCase();
+
+  // Strategy 1: Check the active text editor's file path
+  const activeFile = vscode.window.activeTextEditor?.document?.uri?.fsPath;
+  if (activeFile) {
+    const normalizedFile = normalize(activeFile);
+    for (const repo of knownRepos) {
+      if (repo.path && normalizedFile.startsWith(normalize(repo.path))) {
+        console.log(`[HiveMind] detectActiveRepo() matched '${repo.name}' via active editor file`);
+        return repo.name;
+      }
+    }
+  }
+
+  // Strategy 2: Check workspace folders
+  const folders = vscode.workspace.workspaceFolders;
+  if (folders) {
+    for (const folder of folders) {
+      const normalizedFolder = normalize(folder.uri.fsPath);
+      for (const repo of knownRepos) {
+        if (repo.path) {
+          const normalizedRepoPath = normalize(repo.path);
+          if (
+            normalizedFolder === normalizedRepoPath ||
+            normalizedFolder.startsWith(normalizedRepoPath + "/") ||
+            normalizedRepoPath.startsWith(normalizedFolder + "/")
+          ) {
+            console.log(`[HiveMind] detectActiveRepo() matched '${repo.name}' via workspace folder`);
+            return repo.name;
+          }
+        }
+        // Also match by folder name
+        const folderName = path.basename(folder.uri.fsPath).toLowerCase();
+        if (folderName === repo.name.toLowerCase()) {
+          console.log(`[HiveMind] detectActiveRepo() matched '${repo.name}' via folder name`);
+          return repo.name;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+function extractTargetRepo(prompt: string, client: string): string | null {
+  // Try to match against known repos from repos.yaml
+  const knownRepos = loadKnownRepos(client);
+  if (knownRepos.length > 0) {
+    // Direct name match in prompt
+    const lower = prompt.toLowerCase();
+    for (const repo of knownRepos) {
+      if (lower.includes(repo.name.toLowerCase())) {
+        return repo.name;
+      }
+    }
+  }
+
+  return extractRepo(prompt);
+}
+
+/**
+ * Disambiguate multiple repo candidates by matching prompt keywords
+ * against repo type and platform metadata.
+ *
+ * E.g., if the user says "pipeline" → prefer type=cicd / platform=harness
+ *       if the user says "terraform" → prefer type=infrastructure / platform=terraform
+ */
+function disambiguateByPromptContext(
+  prompt: string,
+  candidates: string[],
+  knownRepos: RepoEntry[],
+): string | null {
+  const lower = prompt.toLowerCase();
+  const typeSignals: Record<string, string[]> = {
+    cicd: ["pipeline", "harness", "ci/cd", "cicd", "deploy", "stage", "step", "trigger", "approval"],
+    infrastructure: ["terraform", "infra", "module", "resource", "provider", "tfvars", "backend"],
+    helm: ["helm", "chart", "values", "kustomize", "k8s", "kubernetes", "deployment", "service"],
+    monitoring: ["monitor", "newrelic", "alert", "dashboard", "observability", "metric"],
+    mixed: ["devops", "artifact"],
+  };
+
+  // Score each candidate
+  let bestScore = 0;
+  let bestCandidate: string | null = null;
+
+  for (const name of candidates) {
+    const repo = knownRepos.find((r) => r.name === name);
+    if (!repo) { continue; }
+
+    let score = 0;
+    // Check type signals
+    const typeWords = typeSignals[repo.type || ""] || [];
+    for (const word of typeWords) {
+      if (lower.includes(word)) { score += 2; }
+    }
+    // Check platform signals
+    const platformWords = typeSignals[repo.platform || ""] || [];
+    for (const word of platformWords) {
+      if (lower.includes(word)) { score += 2; }
+    }
+    // Direct platform name in prompt
+    if (repo.platform && lower.includes(repo.platform.toLowerCase())) { score += 3; }
+    // Direct type in prompt
+    if (repo.type && lower.includes(repo.type.toLowerCase())) { score += 1; }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestCandidate = name;
+    }
+  }
+
+  return bestScore > 0 ? bestCandidate : null;
+}
+
+/**
+ * Extract a target branch from the prompt.
+ * Looks for release_XX_X, develop, main patterns.
+ */
+function extractTargetBranch(prompt: string): string {
+  // release_XX_X patterns
+  const releaseMatch = prompt.match(/\b(release[_/]\d+[_/]\d+)\b/i);
+  if (releaseMatch) {
+    return releaseMatch[1].replace("/", "_");
+  }
+  // develop / development
+  if (/\b(develop|development)\b/i.test(prompt)) {
+    return "develop";
+  }
+  return "main";
+}
+
+/**
+ * Run the write_file.py tool to write generated content to a repo.
+ */
+async function runWriteFile(
+  client: string,
+  repo: string,
+  branch: string,
+  filePath: string,
+  content: string,
+  intent: string,
+): Promise<ToolResult> {
+  return runTool("write_file", [
+    "--client", client,
+    "--repo", repo,
+    "--branch", branch,
+    "--path", filePath,
+    "--content", content,
+    "--intent", intent,
+  ]);
+}
+
+/**
+ * Return the list of repo names for a client (reads repos.yaml).
+ */
+function getClientRepos(client: string): string[] {
+  return loadKnownRepos(client).map((r) => r.name);
+}
+
+/**
+ * Handle a write operation: gather KB context (locations + reference pipelines),
+ * extract intent via LLM (repo, branch, file_path, description), validate the
+ * repo against the known list, generate content with full KB context, then write.
+ *
+ * Fixes three problems:
+ *   1. Repo name is validated against repos.yaml; client name is rejected.
+ *   2. File path comes from LLM informed by query_memory directory locations.
+ *   3. Generated content is based on actual reference pipelines from the KB.
+ */
+async function handleWriteOperation(
+  prompt: string,
+  stream: vscode.ChatResponseStream,
+  token: vscode.CancellationToken,
+  kbContext: string,
+): Promise<string | null> {
+  const activeClient = getActiveClient();
+  const knownRepos = loadKnownRepos(activeClient);
+  const repoNames = knownRepos.map((r) => r.name);
+
+  if (repoNames.length === 0) {
+    console.log(`[HiveMind] No repos found for client '${activeClient}'`);
+    return null;
+  }
+
+  // -----------------------------------------------------------------
+  // Step 1: Gather KB context for intent extraction & content generation
+  // -----------------------------------------------------------------
+
+  // 1a. query_memory — find where similar files live in the codebase
+  stream.progress("Searching KB for file location patterns...");
+  const locationResult = await runTool("query_memory", [
+    "--client", activeClient,
+    "--query", prompt,
+    "--top_k", "3",
+  ]);
+  const locationContext = locationResult.success && locationResult.output
+    ? locationResult.output
+    : "";
+
+  // 1b. Fetch reference pipelines if request is pipeline-related
+  let referencePipelines = "";
+  if (/pipeline|stage|template|deploy|harness|ci|cd/i.test(prompt)) {
+    stream.progress("Fetching reference pipelines from KB...");
+    const infraBuilderResult = await runTool("get_pipeline", [
+      "--client", activeClient, "--name", "infra_builder",
+    ]);
+    const infraCreateEnvResult = await runTool("get_pipeline", [
+      "--client", activeClient, "--name", "infra_createEnv",
+    ]);
+    const refParts: string[] = [];
+    if (infraBuilderResult.success && infraBuilderResult.output) {
+      refParts.push(
+        "### infra_builder pipeline\n" + truncateToolOutput(infraBuilderResult.output)
+      );
+    }
+    if (infraCreateEnvResult.success && infraCreateEnvResult.output) {
+      refParts.push(
+        "### infra_createEnv pipeline\n" + truncateToolOutput(infraCreateEnvResult.output)
+      );
+    }
+    if (refParts.length > 0) {
+      referencePipelines = refParts.join("\n\n");
+    }
+  }
+
+  // -----------------------------------------------------------------
+  // Step 2: Extract structured intent via LLM (repo, branch, path, desc)
+  // -----------------------------------------------------------------
+  stream.progress("Extracting write intent...");
+
+  const intentPrompt = [
+    "You are an intent extraction assistant for an SRE system.",
+    "Extract the write intent from the user request below.",
+    "",
+    `## Available repos for client "${activeClient}"`,
+    `(You MUST pick one of these exact repo names — NEVER return the client name "${activeClient}")`,
+    ...knownRepos.map((r) =>
+      `- ${r.name} (type: ${r.type || "?"}, platform: ${r.platform || "?"})`
+    ),
+    "",
+    "## File Location Context from Knowledge Base",
+    locationContext || "No location context available.",
+    "",
+    referencePipelines
+      ? `## Reference Pipeline Structures\n${referencePipelines}\n`
+      : "",
+    "## User Request",
+    `"${prompt}"`,
+    "",
+    "Pick the most relevant repo from the list above.",
+    "Determine the correct file path based on the directory structures shown in the KB context.",
+    "Respond in JSON only (no markdown fences, no explanation):",
+    '{"repo": "<exact repo name from list>", "branch": "<source branch>", "file_path": "<path within repo>", "description": "<short 2-4 word description>"}',
+  ].join("\n");
+
+  console.log(`[HiveMind] === INTENT PROMPT ===\n${intentPrompt}\n=== END INTENT PROMPT ===`);
+
+  interface WriteIntent {
+    repo: string;
+    branch: string;
+    file_path: string;
+    description: string;
+  }
+
+  let intent: WriteIntent | null = null;
+
+  try {
+    const [model] = await vscode.lm.selectChatModels({
+      vendor: "copilot",
+      family: "gpt-4o",
+    });
+    if (!model) {
+      return null;
+    }
+
+    // First attempt
+    const msgs = [vscode.LanguageModelChatMessage.User(intentPrompt)];
+    const resp = await model.sendRequest(msgs, {}, token);
+    let intentRaw = "";
+    for await (const frag of resp.text) {
+      intentRaw += frag;
+    }
+
+    const jsonMatch = intentRaw.match(/\{[\s\S]*?\}/);
+    if (jsonMatch) {
+      intent = JSON.parse(jsonMatch[0]) as WriteIntent;
+    }
+
+    // Validate repo against known list
+    if (intent && !repoNames.includes(intent.repo)) {
+      console.log(
+        `[HiveMind] Intent repo '${intent.repo}' is not a valid repo name, attempting recovery...`
+      );
+
+      // Fuzzy match
+      const fuzzy = repoNames.filter(
+        (r) =>
+          r.toLowerCase().includes(intent!.repo.toLowerCase()) ||
+          intent!.repo.toLowerCase().includes(r.toLowerCase())
+      );
+
+      if (fuzzy.length === 1) {
+        console.log(`[HiveMind] Fuzzy-matched '${intent.repo}' → '${fuzzy[0]}'`);
+        intent.repo = fuzzy[0];
+      } else {
+        // Re-prompt with explicit list — reject client name on second attempt too
+        console.log(`[HiveMind] Re-prompting LLM with explicit repo list...`);
+        const retryPrompt = [
+          `Your previous answer "${intent.repo}" is NOT a valid repo name.`,
+          `You MUST pick one of these EXACT repo names:`,
+          ...repoNames.map((r) => `- ${r}`),
+          "",
+          `NEVER return the client name "${activeClient}".`,
+          "",
+          `User request: "${prompt}"`,
+          "",
+          "Return JSON only:",
+          '{"repo": "<exact repo name from list>", "branch": "<branch>", "file_path": "<path>", "description": "<desc>"}',
+        ].join("\n");
+
+        const retryMsgs = [vscode.LanguageModelChatMessage.User(retryPrompt)];
+        const retryResp = await model.sendRequest(retryMsgs, {}, token);
+        let retryRaw = "";
+        for await (const frag of retryResp.text) {
+          retryRaw += frag;
+        }
+
+        const retryJson = retryRaw.match(/\{[\s\S]*?\}/);
+        if (retryJson) {
+          const retryIntent = JSON.parse(retryJson[0]) as WriteIntent;
+          if (repoNames.includes(retryIntent.repo)) {
+            intent = retryIntent;
+          } else {
+            // Last resort: disambiguate by content type
+            const byType = disambiguateByPromptContext(prompt, repoNames, knownRepos);
+            if (byType) {
+              intent.repo = byType;
+              console.log(`[HiveMind] Content-type disambiguated to '${byType}'`);
+            } else {
+              console.log(`[HiveMind] Could not resolve repo from LLM output`);
+              return null;
+            }
+          }
+        } else {
+          return null;
+        }
+      }
+    }
+  } catch (e: any) {
+    console.log(`[HiveMind] Intent extraction failed: ${e.message}`);
+    return null;
+  }
+
+  if (!intent || !intent.repo || !intent.file_path) {
+    console.log("[HiveMind] Incomplete intent — aborting write");
+    return null;
+  }
+
+  const resolvedRepo = intent.repo;
+  const targetBranch = intent.branch || extractTargetBranch(prompt);
+  const filePath = intent.file_path;
+
+  console.log(
+    `[HiveMind] Resolved intent: repo=${resolvedRepo}, branch=${targetBranch}, ` +
+    `path=${filePath}, desc=${intent.description}`
+  );
+
+  // -----------------------------------------------------------------
+  // Step 3: Generate content with full KB context (reference pipelines,
+  //         location context, existing kbContext, and user request)
+  // -----------------------------------------------------------------
+  stream.progress("Generating file content from KB context...");
+
+  const genPromptParts = [
+    "You are HiveMind, an SRE assistant that generates infrastructure files.",
+    "Based on the knowledge base context below and the user's request,",
+    "generate ONLY the file content — no markdown fences, no explanation.",
+    "Output the raw file content that should be written to disk.",
+    "",
+  ];
+
+  if (referencePipelines) {
+    genPromptParts.push(
+      "## Reference Pipelines from Knowledge Base",
+      "(Use the actual stage identifiers, template names, connector refs,",
+      "org/project identifiers from these real pipelines)",
+      "",
+      referencePipelines,
+      "",
+    );
+  }
+
+  if (locationContext) {
+    genPromptParts.push(
+      "## Directory Structure & File Locations from KB",
+      locationContext,
+      "",
+    );
+  }
+
+  genPromptParts.push(
+    "## Additional Knowledge Base Context",
+    kbContext,
+    "",
+    "## User Request",
+    prompt,
+    "",
+    "## Target",
+    `File path: ${filePath}`,
+    `Repo: ${resolvedRepo}`,
+    "",
+    "## Instructions",
+    "- Generate the complete file content only",
+    "- Follow patterns found in the reference pipelines and knowledge base above",
+    "- Use the actual stage identifiers, template names, connector refs, org/project identifiers from the reference pipelines",
+    "- Use YAML formatting for pipeline/helm files, HCL for terraform",
+    "- Do NOT wrap in markdown code fences",
+    "- Do NOT include explanatory text before or after",
+  );
+
+  const genPrompt = genPromptParts.join("\n");
+  console.log(`[HiveMind] === GENERATION PROMPT ===\n${genPrompt.substring(0, 3000)}\n=== END GENERATION PROMPT (${genPrompt.length} chars) ===`);
+
+  try {
+    const [model] = await vscode.lm.selectChatModels({
+      vendor: "copilot",
+      family: "gpt-4o",
+    });
+
+    if (!model) {
+      return "❌ No language model available for content generation.";
+    }
+
+    const messages = [vscode.LanguageModelChatMessage.User(genPrompt)];
+    const chatResponse = await model.sendRequest(messages, {}, token);
+
+    let generatedContent = "";
+    for await (const fragment of chatResponse.text) {
+      generatedContent += fragment;
+    }
+
+    // Strip any accidental markdown fences
+    generatedContent = generatedContent
+      .replace(/^```\w*\n?/m, "")
+      .replace(/\n?```$/m, "")
+      .trim();
+
+    if (!generatedContent) {
+      return "❌ Content generation returned empty result.";
+    }
+
+    // -----------------------------------------------------------------
+    // Step 4: Write the file using intent description for branch naming
+    // -----------------------------------------------------------------
+    stream.progress(`Writing ${filePath} to ${resolvedRepo}...`);
+    const writeResult = await runWriteFile(
+      activeClient,
+      resolvedRepo,
+      targetBranch,
+      filePath,
+      generatedContent,
+      intent.description || prompt,
+    );
+
+    if (!writeResult.success) {
+      return `❌ Write failed: ${writeResult.error}`;
+    }
+
+    // Parse the summary from write_file.py output
+    const lines = writeResult.output.split("\n");
+    const branchLine = lines.find((l) => l.includes("Branch created:"));
+    const branchName = branchLine?.replace(/.*Branch created:\s*/, "").trim() || "unknown";
+
+    // Build the work summary
+    const summary = [
+      "## HiveMind Work Summary\n",
+      `**Branch:** ${branchName}`,
+      `**Repo:** ${resolvedRepo}\n`,
+      "**Agents involved:**",
+      "- 🧠 Team Lead: Understood intent, gathered KB context",
+      "- ⚙️ Specialist: Generated file content from KB patterns\n",
+      "**Files changed:**",
+      `- 📄 CREATED: ${filePath}\n`,
+      "**What was done:**",
+      `Generated \`${filePath}\` based on existing patterns in the knowledge base ` +
+        `and the user's request. Content was written to branch \`${branchName}\`.\n`,
+      "➡️ Review the files above, then git add / commit / push when ready.",
+    ].join("\n");
+
+    return summary;
+  } catch (err: any) {
+    return `❌ Write operation failed: ${err.message}`;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Chat Request Handler (Main @hivemind participant)
 // ---------------------------------------------------------------------------
 
@@ -1156,6 +1766,26 @@ async function handleChatRequest(
     }
   }
 
+  // 2f. Write intent detection — if the user wants to create/modify a file
+  let writeIntentDetected = false;
+  if (hasWriteIntent(prompt) && !token.isCancellationRequested) {
+    writeIntentDetected = true;
+    const kbContextForWrite = contextParts.length > 0
+      ? contextParts.join("\n\n")
+      : "No KB context available.";
+
+    const writeResult = await handleWriteOperation(
+      prompt, stream, token, kbContextForWrite
+    );
+
+    if (writeResult) {
+      stream.markdown(writeResult);
+      return {};
+    }
+    // If writeResult is null, couldn't determine target repo — fall through
+    // to creative Q&A mode (NOT strict KB-only mode)
+  }
+
   // 3. Build augmented prompt
   console.log(`[HiveMind] contextParts count=${contextParts.length}`);
   const instructions = loadInstructions();
@@ -1180,20 +1810,40 @@ async function handleChatRequest(
     toolContext = `## Tool Results\n\nNO RESULTS RETURNED\nError detail: ${lastToolError}\nPython path used: ${getPythonPath()}\nProject root: ${getProjectRoot()}\nClient: ${activeClient}`;
   }
 
+  // Build the framing based on whether this is a write (creative) or read (strict) request
+  const kbFraming = writeIntentDetected
+    ? [
+        `\n${'='.repeat(60)}`,
+        `REFERENCE PATTERNS FROM KNOWLEDGE BASE`,
+        `The following are EXISTING files from the ${activeClient.toUpperCase()} infrastructure repos.`,
+        `Use these as REFERENCE PATTERNS and EXAMPLES to help generate new content.`,
+        `You may combine patterns, adapt structures, and create new configurations`,
+        `based on these examples. Cite the source patterns you drew from.`,
+        `${'='.repeat(60)}\n`,
+        toolContext,
+        `\n${'='.repeat(60)}`,
+        `END OF REFERENCE PATTERNS`,
+        `${'='.repeat(60)}\n`,
+        `REQUEST (use the reference patterns above to generate what the user asks for):`,
+      ]
+    : [
+        `\n${'='.repeat(60)}`,
+        `KNOWLEDGE BASE RESULTS — YOUR ONLY SOURCE OF TRUTH`,
+        `This is real data from the ${activeClient.toUpperCase()} infrastructure repos.`,
+        `Base your ENTIRE answer on this data. Cite the exact file paths shown.`,
+        `If empty → respond with "NOT IN KNOWLEDGE BASE" only.`,
+        `${'='.repeat(60)}\n`,
+        toolContext,
+        `\n${'='.repeat(60)}`,
+        `END OF KNOWLEDGE BASE RESULTS`,
+        `${'='.repeat(60)}\n`,
+        `QUESTION (answer using ONLY the knowledge base results above, never from training data):`,
+      ];
+
   const fullPrompt = [
     instructions,
     profileContext,
-    `\n${'='.repeat(60)}`,
-    `KNOWLEDGE BASE RESULTS — YOUR ONLY SOURCE OF TRUTH`,
-    `This is real data from the DFIN infrastructure repos.`,
-    `Base your ENTIRE answer on this data. Cite the exact file paths shown.`,
-    `If empty → respond with "NOT IN KNOWLEDGE BASE" only.`,
-    `${'='.repeat(60)}\n`,
-    toolContext,
-    `\n${'='.repeat(60)}`,
-    `END OF KNOWLEDGE BASE RESULTS`,
-    `${'='.repeat(60)}\n`,
-    `QUESTION (answer using ONLY the knowledge base results above, never from training data):`,
+    ...kbFraming,
     prompt,
   ].join("\n");
 
@@ -1292,15 +1942,73 @@ export function activate(context: vscode.ExtensionContext) {
 
   outputChannel.appendLine("HiveMind extension activated.");
   outputChannel.appendLine(`__dirname: ${__dirname}`);
-  outputChannel.appendLine(`Project root: ${getProjectRoot()}`);
+
+  // Pre-validate: if getProjectRoot() returns a path without tools/,
+  // force a workspace-folder scan right now (workspace is definitely ready
+  // inside activate).
+  let root = getProjectRoot();
+  if (!fs.existsSync(path.join(root, "tools"))) {
+    outputChannel.appendLine(`Initial root invalid (${root}), rescanning workspace folders...`);
+    _projectRoot = undefined; // clear the un-cached fallback
+    const folders = vscode.workspace.workspaceFolders;
+    if (folders) {
+      for (const folder of folders) {
+        const candidate = folder.uri.fsPath;
+        if (
+          fs.existsSync(path.join(candidate, "memory")) &&
+          fs.existsSync(path.join(candidate, "tools"))
+        ) {
+          _projectRoot = candidate;
+          outputChannel.appendLine(`Root fixed via workspace folder: ${_projectRoot}`);
+          break;
+        }
+      }
+    }
+    root = getProjectRoot();
+  }
+
+  outputChannel.appendLine(`Project root: ${root}`);
   outputChannel.appendLine(`Instructions path: ${getInstructionsPath()}`);
   outputChannel.appendLine(`Instructions exist: ${fs.existsSync(getInstructionsPath())}`);
-  outputChannel.appendLine(`Tools dir exists: ${fs.existsSync(path.join(getProjectRoot(), "tools"))}`);
-  outputChannel.appendLine(`Memory dir exists: ${fs.existsSync(path.join(getProjectRoot(), "memory"))}`);
+  outputChannel.appendLine(`Tools dir exists: ${fs.existsSync(path.join(root, "tools"))}`);
+  outputChannel.appendLine(`Memory dir exists: ${fs.existsSync(path.join(root, "memory"))}`);
 
   // 1. Detect and set active client
   detectAndSetClient();
   outputChannel.appendLine(`Active client: ${getActiveClient()}`);
+
+  // 1b. If HiveMind root was not found via setting or workspace, prompt user
+  const resolvedRoot = getProjectRoot();
+  const hasMemory = fs.existsSync(path.join(resolvedRoot, "memory"));
+  const hasTools = fs.existsSync(path.join(resolvedRoot, "tools"));
+  if (!hasMemory || !hasTools) {
+    const hivemindConfig = vscode.workspace.getConfiguration('hivemind');
+    const currentSetting = hivemindConfig.get<string>('projectRoot') || '';
+    if (!currentSetting.trim()) {
+      vscode.window
+        .showWarningMessage(
+          "HiveMind: Project root not found. Set hivemind.projectRoot to use @hivemind from this workspace.",
+          "Configure Now"
+        )
+        .then((selection) => {
+          if (selection === "Configure Now") {
+            vscode.commands.executeCommand(
+              "workbench.action.openSettings",
+              "hivemind.projectRoot"
+            );
+          }
+        });
+    }
+  }
+
+  // 1c. Log workspace context for debugging
+  const wsFolder = vscode.workspace.workspaceFolders?.[0];
+  if (wsFolder) {
+    const wsName = path.basename(wsFolder.uri.fsPath);
+    outputChannel.appendLine(`Workspace: ${wsName} (${wsFolder.uri.fsPath})`);
+    outputChannel.appendLine(`HiveMind root: ${resolvedRoot}`);
+    outputChannel.appendLine(`Root valid: memory=${hasMemory}, tools=${hasTools}`);
+  }
 
   // 2. Register @hivemind chat participant (simplified)
   const participant = vscode.chat.createChatParticipant(
