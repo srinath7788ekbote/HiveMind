@@ -117,7 +117,8 @@ class BranchProtection:
 
         Returns:
             Tier classification: 'production', 'integration', 'release',
-            'hotfix', 'feature' (unprotected), or 'unknown'.
+            'hotfix', 'feature' (unprotected), 'fix' (unprotected),
+            'chore' (unprotected), or 'unknown'.
         """
         clean = branch.replace("origin/", "")
 
@@ -131,6 +132,12 @@ class BranchProtection:
             return "hotfix"
         if re.match(r"^feature[_/]", clean, re.IGNORECASE):
             return "feature"
+        if re.match(r"^feat[_/]", clean, re.IGNORECASE):
+            return "feature"
+        if re.match(r"^fix[_/]", clean, re.IGNORECASE):
+            return "fix"
+        if re.match(r"^chore[_/]", clean, re.IGNORECASE):
+            return "chore"
         return "unknown"
 
     def validate_branch_for_edit(self, branch: str) -> None:
