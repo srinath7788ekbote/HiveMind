@@ -137,7 +137,11 @@ async def hivemind_query_memory(
 
     Searches indexed infrastructure files (Terraform, pipelines, Helm, etc.)
     for content matching the query. Returns ranked results with file paths,
-    repos, and relevance scores.
+    repos, relevance scores, and pre-formatted source citations.
+
+    Each result includes a `source_citation` field formatted as:
+        [Source: <file_path> | repo: <repo> | branch: <branch> | relevance: <score>%]
+    Use this field directly in your response to cite sources.
 
     Use this tool FIRST for any question about infrastructure, pipelines,
     services, secrets, or environments.
