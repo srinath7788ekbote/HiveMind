@@ -42,6 +42,7 @@ from tools.diff_branches import diff_branches
 from tools.list_branches import list_branches
 from tools.set_client import set_active_client, get_active_client, list_clients
 from tools.write_file import write_file
+from tools.check_branch import check_branch
 
 # ---------------------------------------------------------------------------
 # ChromaDB availability check (printed once at import time)
@@ -492,6 +493,36 @@ async def hivemind_write_file(
 
 
 @mcp_server.tool()
+async def hivemind_check_branch(
+    client: str,
+    repo: str,
+    branch: str,
+) -> str:
+    """Check if a branch is indexed and/or exists on remote.
+
+    Always call this BEFORE any branch-specific investigation, comparison,
+    or analysis. Returns whether the branch is indexed in HiveMind,
+    whether it exists on the remote repo, and suggests the closest
+    indexed branch if not indexed.
+
+    Args:
+        client: Client name (e.g. "dfin").
+        repo: Repository name (e.g. "Eastwood-terraform").
+        branch: Branch name to check (e.g. "release_26_1").
+    """
+    try:
+        result = await _run_with_timeout(
+            check_branch,
+            client=client,
+            repo=repo,
+            branch=branch,
+        )
+        return _format_result(result)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp_server.tool()
 async def hivemind_get_active_client() -> str:
     """Get the currently active client name.
 
@@ -548,6 +579,7 @@ TOOL_REGISTRY = {
     "hivemind_write_file": hivemind_write_file,
     "hivemind_get_active_client": hivemind_get_active_client,
     "hivemind_get_active_branch": hivemind_get_active_branch,
+    "hivemind_check_branch": hivemind_check_branch,
 }
 
 
@@ -574,9 +606,9 @@ def run_self_test() -> bool:
     # Verify the FastMCP server has them registered
     registered_count = len(expected_tools)
     print()
-    print(f"Tools registered: {registered_count}/13")
+    print(f"Tools registered: {registered_count}/14")
 
-    if registered_count == 13 and all_ok:
+    if registered_count == 14 and all_ok:
         print("All tools healthy.")
         return True
     else:

@@ -113,18 +113,26 @@ Do NOT use slash commands or the VS Code extension participant.
 
 Before any analysis or comparison involving a specific branch:
 
-1. Call `list_branches` (or `hivemind_list_branches`) to get all indexed branches for the relevant repo(s)
-2. If the requested branch is **NOT** in the indexed list, **STOP** and respond:
+1. Call `check_branch(client, repo, branch)` (or `hivemind_check_branch`) before any branch-specific work
+2. If `indexed=true` → proceed normally
+3. If `indexed=false` AND `exists_on_remote=true` → **STOP** and ask the user:
    ```
-   ⚠️ Branch `<branch>` is not indexed for `<repo>`.
-   Indexed branches are: <list>
-   Should I:
-   (a) Index it now — run: python ingest/crawl_repos.py --client <client> --config clients/<client>/repos.yaml --branch <branch>
-   (b) Use a different branch — which one?
-   (c) Proceed with closest available branch — `<suggestion>`?
+   ⚠️ `<branch>` exists in `<repo>` but isn't indexed yet.
+   Index it now? (recommended — ~2-3 mins)
+   Or use closest indexed branch: `<suggestion>`?
    ```
-3. **Never assume or substitute a branch without explicit user confirmation**
-4. **Never silently fall back to a different branch** — this produces wrong analysis
+   Wait for user confirmation before proceeding.
+   If user confirms indexing → tell user to run:
+   `python ingest/crawl_repos.py --client <client> --config clients/<client>/repos.yaml --branch <branch>`
+   Then re-run the investigation.
+4. If `indexed=false` AND `exists_on_remote=false` → **STOP** and ask:
+   ```
+   ⚠️ Branch `<branch>` not found in `<repo>` — not indexed and not on remote.
+   Did you mean one of: <indexed_branches>?
+   ```
+5. If `exists_on_remote="unknown"` (network error) → warn and offer indexed alternatives
+6. **NEVER** silently substitute a different branch
+7. **NEVER** assume the closest branch is correct without asking
 
 ## Anti-Hallucination
 

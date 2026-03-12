@@ -6,7 +6,7 @@ Covers:
     - Timeout wrapper returns error dict on timeout, not an exception
     - Two concurrent tool calls both complete (no blocking)
     - ChromaDB availability flag is set
-    - Self-test validates all 13 tools
+    - Self-test validates all 14 tools
     - _format_result handles edge cases
     - _run_with_timeout propagates results and errors correctly
 """
@@ -28,6 +28,7 @@ from hivemind_mcp.hivemind_server import (
     TOOL_TIMEOUT_SECS,
     _format_result,
     _run_with_timeout,
+    hivemind_check_branch,
     hivemind_diff_branches,
     hivemind_get_active_branch,
     hivemind_get_active_client,
@@ -53,6 +54,7 @@ class TestToolsAreAsync(unittest.TestCase):
     """Every MCP tool wrapper must be an async (coroutine) function."""
 
     TOOL_FUNCTIONS = [
+        hivemind_check_branch,
         hivemind_query_memory,
         hivemind_query_graph,
         hivemind_get_entity,
@@ -75,11 +77,11 @@ class TestToolsAreAsync(unittest.TestCase):
                 f"{fn.__name__} is not async",
             )
 
-    def test_tool_count_is_13(self):
-        self.assertEqual(len(self.TOOL_FUNCTIONS), 13)
+    def test_tool_count_is_14(self):
+        self.assertEqual(len(self.TOOL_FUNCTIONS), 14)
 
-    def test_registry_has_13_tools(self):
-        self.assertEqual(len(TOOL_REGISTRY), 13)
+    def test_registry_has_14_tools(self):
+        self.assertEqual(len(TOOL_REGISTRY), 14)
 
     def test_registry_values_are_callable(self):
         for name, fn in TOOL_REGISTRY.items():
