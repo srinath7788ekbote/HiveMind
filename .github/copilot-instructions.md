@@ -141,6 +141,26 @@ These rules are absolute. Violating any one invalidates the response.
 
 Always label results with `[branch: {name}]` when showing cross-branch data.
 
+### ⚠️ Branch Validation Rule — MANDATORY PRE-FLIGHT CHECK
+
+Before any investigation, comparison, or analysis involving a specific branch:
+
+1. Call `list_branches` (or `hivemind_list_branches`) to get all indexed branches for the relevant repo(s)
+2. If the requested branch is **NOT** in the indexed list, **STOP** and respond:
+   ```
+   ⚠️ Branch `<branch>` is not indexed for `<repo>`.
+   Indexed branches are: <list>
+   Should I:
+   (a) Index it now — run: python ingest/crawl_repos.py --client <client> --config clients/<client>/repos.yaml --branch <branch>
+   (b) Use a different branch — which one?
+   (c) Proceed with closest available branch — `<suggestion>`?
+   ```
+3. **Never assume or substitute a branch without explicit user confirmation**
+4. **Never silently fall back to a different branch** — this produces wrong analysis
+5. This rule applies to ALL agents: Investigator, Analyst, DevOps, Architect, Security, Planner
+
+**Why this matters:** Silently substituting a branch (e.g., using `release_12_18` when the user asked about `release_26_1`) produces an entire investigation based on wrong data. The user may not notice the substitution, leading to invalid conclusions.
+
 ---
 
 ## 4. Client Architecture Instruction
