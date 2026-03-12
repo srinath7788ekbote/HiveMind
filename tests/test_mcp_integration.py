@@ -9,6 +9,7 @@ Validates end-to-end flows:
     - Tool responses are structurally valid and parseable
 """
 
+import asyncio
 import json
 import os
 import shutil
@@ -183,7 +184,7 @@ class TestQueryMemoryIntegration(MCPIntegrationTestCase):
         from hivemind_mcp.hivemind_server import hivemind_query_memory
 
         direct = query_memory(client="integ", query="audit deploy", top_k=5)
-        mcp_result = json.loads(hivemind_query_memory(client="integ", query="audit deploy", top_k=5))
+        mcp_result = json.loads(asyncio.run(hivemind_query_memory(client="integ", query="audit deploy", top_k=5)))
 
         # Both should be lists
         self.assertIsInstance(direct, list)
@@ -194,19 +195,19 @@ class TestQueryMemoryIntegration(MCPIntegrationTestCase):
     def test_mcp_query_memory_with_branch_filter(self):
         """MCP query_memory respects branch filter."""
         from hivemind_mcp.hivemind_server import hivemind_query_memory
-        result = json.loads(hivemind_query_memory(client="integ", query="audit", branch="main"))
+        result = json.loads(asyncio.run(hivemind_query_memory(client="integ", query="audit", branch="main")))
         self.assertIsInstance(result, list)
 
     def test_mcp_query_memory_with_type_filter(self):
         """MCP query_memory respects type filter."""
         from hivemind_mcp.hivemind_server import hivemind_query_memory
-        result = json.loads(hivemind_query_memory(client="integ", query="deploy", filter_type="pipeline"))
+        result = json.loads(asyncio.run(hivemind_query_memory(client="integ", query="deploy", filter_type="pipeline")))
         self.assertIsInstance(result, list)
 
     def test_mcp_query_memory_top_k(self):
         """MCP query_memory respects top_k limit."""
         from hivemind_mcp.hivemind_server import hivemind_query_memory
-        result = json.loads(hivemind_query_memory(client="integ", query="deploy", top_k=1))
+        result = json.loads(asyncio.run(hivemind_query_memory(client="integ", query="deploy", top_k=1)))
         self.assertIsInstance(result, list)
         self.assertLessEqual(len(result), 1)
 
@@ -220,7 +221,7 @@ class TestQueryGraphIntegration(MCPIntegrationTestCase):
         from hivemind_mcp.hivemind_server import hivemind_query_graph
 
         direct = query_graph(client="integ", entity="audit-service")
-        mcp_result = json.loads(hivemind_query_graph(client="integ", entity="audit-service"))
+        mcp_result = json.loads(asyncio.run(hivemind_query_graph(client="integ", entity="audit-service")))
 
         self.assertIsInstance(direct, dict)
         self.assertIsInstance(mcp_result, dict)
@@ -229,7 +230,7 @@ class TestQueryGraphIntegration(MCPIntegrationTestCase):
     def test_mcp_query_graph_direction(self):
         """MCP query_graph respects direction parameter."""
         from hivemind_mcp.hivemind_server import hivemind_query_graph
-        result = json.loads(hivemind_query_graph(client="integ", entity="audit-service", direction="out"))
+        result = json.loads(asyncio.run(hivemind_query_graph(client="integ", entity="audit-service", direction="out")))
         self.assertIsInstance(result, dict)
 
 
@@ -242,7 +243,7 @@ class TestGetEntityIntegration(MCPIntegrationTestCase):
         from hivemind_mcp.hivemind_server import hivemind_get_entity
 
         direct = get_entity(client="integ", name="audit-service")
-        mcp_result = json.loads(hivemind_get_entity(client="integ", name="audit-service"))
+        mcp_result = json.loads(asyncio.run(hivemind_get_entity(client="integ", name="audit-service")))
 
         self.assertIsInstance(direct, dict)
         self.assertIsInstance(mcp_result, dict)
@@ -250,7 +251,7 @@ class TestGetEntityIntegration(MCPIntegrationTestCase):
     def test_nonexistent_entity_returns_error(self):
         """MCP get_entity for a nonexistent entity returns error dict."""
         from hivemind_mcp.hivemind_server import hivemind_get_entity
-        result = json.loads(hivemind_get_entity(client="integ", name="nonexistent-xyz"))
+        result = json.loads(asyncio.run(hivemind_get_entity(client="integ", name="nonexistent-xyz")))
         self.assertIsInstance(result, dict)
         self.assertIn("error", result)
 
@@ -261,7 +262,7 @@ class TestSearchFilesIntegration(MCPIntegrationTestCase):
     def test_mcp_search_files_returns_list(self):
         """MCP search_files returns a list of file matches."""
         from hivemind_mcp.hivemind_server import hivemind_search_files
-        result = json.loads(hivemind_search_files(client="integ", query="deploy"))
+        result = json.loads(asyncio.run(hivemind_search_files(client="integ", query="deploy")))
         self.assertIsInstance(result, list)
 
 
@@ -271,7 +272,7 @@ class TestImpactAnalysisIntegration(MCPIntegrationTestCase):
     def test_mcp_impact_analysis_returns_structure(self):
         """MCP impact_analysis returns a well-formed dict."""
         from hivemind_mcp.hivemind_server import hivemind_impact_analysis
-        result = json.loads(hivemind_impact_analysis(client="integ", entity="audit-service"))
+        result = json.loads(asyncio.run(hivemind_impact_analysis(client="integ", entity="audit-service")))
         self.assertIsInstance(result, dict)
         # Should have some standard keys
         if "error" not in result:
@@ -283,7 +284,7 @@ class TestImpactAnalysisIntegration(MCPIntegrationTestCase):
         from hivemind_mcp.hivemind_server import hivemind_impact_analysis
 
         direct = impact_analysis(client="integ", entity="audit-service")
-        mcp_result = json.loads(hivemind_impact_analysis(client="integ", entity="audit-service"))
+        mcp_result = json.loads(asyncio.run(hivemind_impact_analysis(client="integ", entity="audit-service")))
 
         self.assertIsInstance(direct, dict)
         self.assertIsInstance(mcp_result, dict)
@@ -299,7 +300,7 @@ class TestActiveClientFlow(MCPIntegrationTestCase):
         """Client parameter is passed through to query_memory correctly."""
         from hivemind_mcp.hivemind_server import hivemind_query_memory
         # The "integ" client has fixtures set up — should work without error
-        result = hivemind_query_memory(client="integ", query="test")
+        result = asyncio.run(hivemind_query_memory(client="integ", query="test"))
         parsed = json.loads(result)
         # Should not have an error key (since client exists)
         if isinstance(parsed, dict):
@@ -308,14 +309,14 @@ class TestActiveClientFlow(MCPIntegrationTestCase):
     def test_active_client_flows_to_query_graph(self):
         """Client parameter is passed through to query_graph correctly."""
         from hivemind_mcp.hivemind_server import hivemind_query_graph
-        result = hivemind_query_graph(client="integ", entity="audit-service")
+        result = asyncio.run(hivemind_query_graph(client="integ", entity="audit-service"))
         parsed = json.loads(result)
         self.assertIsInstance(parsed, dict)
 
     def test_wrong_client_gives_empty_results(self):
         """Using wrong client name gives empty/error results, not crash."""
         from hivemind_mcp.hivemind_server import hivemind_query_memory
-        result = hivemind_query_memory(client="wrong_client_name", query="test")
+        result = asyncio.run(hivemind_query_memory(client="wrong_client_name", query="test"))
         parsed = json.loads(result)
         # Should return empty list or error — not crash
         self.assertIsInstance(parsed, (list, dict))
@@ -327,26 +328,26 @@ class TestWriteFileIntegration(MCPIntegrationTestCase):
     def test_write_file_rejects_nonexistent_repo(self):
         """write_file with nonexistent repo returns error."""
         from hivemind_mcp.hivemind_server import hivemind_write_file
-        result = hivemind_write_file(
+        result = asyncio.run(hivemind_write_file(
             client="integ",
             repo_name="nonexistent-repo",
             branch="feature/test",
             file_path="test.txt",
             content="hello",
-        )
+        ))
         parsed = json.loads(result)
         self.assertIn("error", parsed)
 
     def test_write_file_protected_branch_mentioned(self):
         """write_file targeting main should either redirect or error (branch protection)."""
         from hivemind_mcp.hivemind_server import hivemind_write_file
-        result = hivemind_write_file(
+        result = asyncio.run(hivemind_write_file(
             client="integ",
             repo_name="nonexistent-repo",
             branch="main",
             file_path="test.txt",
             content="hello",
-        )
+        ))
         # Should get an error since repo doesn't exist — but it shouldn't crash
         parsed = json.loads(result)
         self.assertIn("error", parsed)
@@ -358,7 +359,7 @@ class TestGetSecretFlowIntegration(MCPIntegrationTestCase):
     def test_mcp_secret_flow_returns_structure(self):
         """MCP get_secret_flow returns a well-formed dict."""
         from hivemind_mcp.hivemind_server import hivemind_get_secret_flow
-        result = json.loads(hivemind_get_secret_flow(client="integ", secret="integ-dev-dbauditservice"))
+        result = json.loads(asyncio.run(hivemind_get_secret_flow(client="integ", secret="integ-dev-dbauditservice")))
         self.assertIsInstance(result, dict)
         if "error" not in result:
             self.assertIn("secret", result)

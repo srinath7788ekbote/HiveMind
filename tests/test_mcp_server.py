@@ -12,6 +12,7 @@ Validates:
     - Concurrent calls don't crash the server
 """
 
+import asyncio
 import json
 import os
 import shutil
@@ -150,7 +151,7 @@ class TestGetActiveClientTool(unittest.TestCase):
         original = srv.ACTIVE_CLIENT_FILE
         srv.ACTIVE_CLIENT_FILE = self.client_file
         try:
-            result = json.loads(hivemind_get_active_client())
+            result = json.loads(asyncio.run(hivemind_get_active_client()))
             self.assertEqual(result["client"], "dfin")
         finally:
             srv.ACTIVE_CLIENT_FILE = original
@@ -162,7 +163,7 @@ class TestGetActiveClientTool(unittest.TestCase):
         original = srv.ACTIVE_CLIENT_FILE
         srv.ACTIVE_CLIENT_FILE = self.test_dir / "nonexistent.txt"
         try:
-            result = json.loads(hivemind_get_active_client())
+            result = json.loads(asyncio.run(hivemind_get_active_client()))
             self.assertIn("error", result)
         finally:
             srv.ACTIVE_CLIENT_FILE = original
@@ -175,7 +176,7 @@ class TestGetActiveClientTool(unittest.TestCase):
         original = srv.ACTIVE_CLIENT_FILE
         srv.ACTIVE_CLIENT_FILE = self.client_file
         try:
-            result = json.loads(hivemind_get_active_client())
+            result = json.loads(asyncio.run(hivemind_get_active_client()))
             self.assertIn("error", result)
         finally:
             srv.ACTIVE_CLIENT_FILE = original
@@ -198,7 +199,7 @@ class TestGetActiveBranchTool(unittest.TestCase):
         original = srv.ACTIVE_BRANCH_FILE
         srv.ACTIVE_BRANCH_FILE = self.branch_file
         try:
-            result = json.loads(srv.hivemind_get_active_branch())
+            result = json.loads(asyncio.run(srv.hivemind_get_active_branch()))
             self.assertEqual(result["branch"], "release_26_3")
         finally:
             srv.ACTIVE_BRANCH_FILE = original
@@ -209,7 +210,7 @@ class TestGetActiveBranchTool(unittest.TestCase):
         original = srv.ACTIVE_BRANCH_FILE
         srv.ACTIVE_BRANCH_FILE = self.test_dir / "nonexistent.txt"
         try:
-            result = json.loads(srv.hivemind_get_active_branch())
+            result = json.loads(asyncio.run(srv.hivemind_get_active_branch()))
             self.assertIn("error", result)
         finally:
             srv.ACTIVE_BRANCH_FILE = original
@@ -221,7 +222,7 @@ class TestGetActiveBranchTool(unittest.TestCase):
         original = srv.ACTIVE_BRANCH_FILE
         srv.ACTIVE_BRANCH_FILE = self.branch_file
         try:
-            result = json.loads(srv.hivemind_get_active_branch())
+            result = json.loads(asyncio.run(srv.hivemind_get_active_branch()))
             self.assertIn("error", result)
         finally:
             srv.ACTIVE_BRANCH_FILE = original
@@ -233,7 +234,7 @@ class TestToolErrorHandling(unittest.TestCase):
     def _call_and_check_no_crash(self, tool_fn, kwargs):
         """Call the tool and verify it returns a string (not raises)."""
         try:
-            result = tool_fn(**kwargs)
+            result = asyncio.run(tool_fn(**kwargs))
             self.assertIsInstance(result, str)
             return result
         except Exception as e:
@@ -424,14 +425,14 @@ class TestToolsWithFixtures(unittest.TestCase):
     def test_query_memory_returns_results(self):
         """query_memory via MCP returns results from test fixtures."""
         from hivemind_mcp.hivemind_server import hivemind_query_memory
-        result = hivemind_query_memory(client="testmcp", query="audit deploy")
+        result = asyncio.run(hivemind_query_memory(client="testmcp", query="audit deploy"))
         parsed = json.loads(result)
         self.assertIsInstance(parsed, list)
 
     def test_query_graph_returns_structure(self):
         """query_graph via MCP returns a well-formed dict."""
         from hivemind_mcp.hivemind_server import hivemind_query_graph
-        result = hivemind_query_graph(client="testmcp", entity="audit-service")
+        result = asyncio.run(hivemind_query_graph(client="testmcp", entity="audit-service"))
         parsed = json.loads(result)
         self.assertIsInstance(parsed, dict)
         self.assertIn("entity", parsed)
@@ -439,35 +440,35 @@ class TestToolsWithFixtures(unittest.TestCase):
     def test_get_entity_returns_structure(self):
         """get_entity via MCP returns entity info or error."""
         from hivemind_mcp.hivemind_server import hivemind_get_entity
-        result = hivemind_get_entity(client="testmcp", name="audit-service")
+        result = asyncio.run(hivemind_get_entity(client="testmcp", name="audit-service"))
         parsed = json.loads(result)
         self.assertIsInstance(parsed, dict)
 
     def test_search_files_returns_list(self):
         """search_files via MCP returns a list."""
         from hivemind_mcp.hivemind_server import hivemind_search_files
-        result = hivemind_search_files(client="testmcp", query="deploy")
+        result = asyncio.run(hivemind_search_files(client="testmcp", query="deploy"))
         parsed = json.loads(result)
         self.assertIsInstance(parsed, list)
 
     def test_get_pipeline_returns_structure(self):
         """get_pipeline via MCP returns a dict."""
         from hivemind_mcp.hivemind_server import hivemind_get_pipeline
-        result = hivemind_get_pipeline(client="testmcp", name="deploy_audit")
+        result = asyncio.run(hivemind_get_pipeline(client="testmcp", name="deploy_audit"))
         parsed = json.loads(result)
         self.assertIsInstance(parsed, dict)
 
     def test_get_secret_flow_returns_structure(self):
         """get_secret_flow via MCP returns a dict."""
         from hivemind_mcp.hivemind_server import hivemind_get_secret_flow
-        result = hivemind_get_secret_flow(client="testmcp", secret="test-secret-db")
+        result = asyncio.run(hivemind_get_secret_flow(client="testmcp", secret="test-secret-db"))
         parsed = json.loads(result)
         self.assertIsInstance(parsed, dict)
 
     def test_impact_analysis_returns_structure(self):
         """impact_analysis via MCP returns a dict."""
         from hivemind_mcp.hivemind_server import hivemind_impact_analysis
-        result = hivemind_impact_analysis(client="testmcp", entity="audit-service")
+        result = asyncio.run(hivemind_impact_analysis(client="testmcp", entity="audit-service"))
         parsed = json.loads(result)
         self.assertIsInstance(parsed, dict)
 
@@ -478,13 +479,13 @@ class TestWriteFileBranchProtection(unittest.TestCase):
     def test_write_file_returns_string_not_crash(self):
         """write_file with invalid inputs returns an error string, not crash."""
         from hivemind_mcp.hivemind_server import hivemind_write_file
-        result = hivemind_write_file(
+        result = asyncio.run(hivemind_write_file(
             client="nonexistent",
             repo_name="fake",
             branch="main",
             file_path="test.txt",
             content="hello",
-        )
+        ))
         self.assertIsInstance(result, str)
         # Should be an error since repo doesn't exist
         parsed = json.loads(result)
@@ -502,7 +503,6 @@ class TestConcurrentToolCalls(unittest.TestCase):
             hivemind_get_entity,
             hivemind_search_files,
         )
-        import concurrent.futures
 
         calls = [
             (hivemind_query_memory, {"client": "fake", "query": "test"}),
@@ -511,11 +511,12 @@ class TestConcurrentToolCalls(unittest.TestCase):
             (hivemind_search_files, {"client": "fake", "query": "test"}),
         ]
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-            futures = [
-                executor.submit(fn, **kwargs) for fn, kwargs in calls
-            ]
-            results = [f.result(timeout=30) for f in concurrent.futures.as_completed(futures)]
+        async def run_all():
+            return await asyncio.gather(
+                *[fn(**kwargs) for fn, kwargs in calls]
+            )
+
+        results = asyncio.run(run_all())
 
         self.assertEqual(len(results), 4)
         for r in results:

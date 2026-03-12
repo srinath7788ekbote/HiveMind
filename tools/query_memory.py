@@ -16,10 +16,18 @@ import json
 import os
 import re
 import sys
+import threading
+import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+
+# ---------------------------------------------------------------------------
+# Performance constants
+# ---------------------------------------------------------------------------
+HIGH_RELEVANCE_THRESHOLD = 0.8   # Score (0-1) considered "high quality"
+JSON_SCORING_TIMEOUT_SECS = 30   # Hard timeout for JSON fallback scoring
 
 
 def _simple_relevance(query: str, text: str, file_path: str = "") -> float:
@@ -61,6 +69,35 @@ def _simple_relevance(query: str, text: str, file_path: str = "") -> float:
             score = min(1.0, score + 0.15 * path_overlap)
 
     return round(min(1.0, score), 4)
+
+
+def _filter_vector_files_by_branch(
+    json_files: list[Path], branch: str | None
+) -> list[Path]:
+    """
+    Pre-filter vector JSON files by branch name.
+
+    Vector files follow the naming convention ``<repo>_<branch>.json``
+    (e.g. ``dfin-harness-pipelines_release_26_2.json``).  When a branch
+    is specified we can skip loading files that clearly belong to other
+    branches — this avoids parsing tens of megabytes of irrelevant data.
+
+    Falls back to all files when no branch match is found so callers
+    never receive an empty list accidentally.
+    """
+    if not branch or branch == "all":
+        return json_files
+
+    # Normalise branch slug for filename matching
+    branch_slug = branch.replace("/", "_").replace("-", "_").lower()
+
+    filtered = [
+        f for f in json_files if branch_slug in f.stem.replace("-", "_").lower()
+    ]
+
+    # Fall back to all files if nothing matched (branch may be encoded
+    # differently or the naming convention is non-standard).
+    return filtered if filtered else json_files
 
 
 def query_memory(
@@ -137,13 +174,19 @@ def query_memory(
     except ImportError:
         pass
 
-    # Fallback: JSON-based search
+    # ------------------------------------------------------------------
+    # Fallback: JSON-based search  (optimised)
+    # ------------------------------------------------------------------
     vectors_dir = mem_dir / "vectors"
     if not vectors_dir.exists():
         return []
 
-    all_chunks = []
-    for json_file in vectors_dir.glob("*.json"):
+    # 1. Enumerate vector JSON files and pre-filter by branch
+    json_files = list(vectors_dir.glob("*.json"))
+    json_files = _filter_vector_files_by_branch(json_files, branch)
+
+    all_chunks: list[dict] = []
+    for json_file in json_files:
         try:
             with open(json_file, 'r', encoding='utf-8') as f:
                 chunks = json.load(f)
@@ -152,15 +195,25 @@ def query_memory(
         except (json.JSONDecodeError, OSError):
             continue
 
-    # Apply filters
+    # 2. Apply metadata filters
     if branch:
         all_chunks = [c for c in all_chunks if c.get("metadata", {}).get("branch") == branch]
     if filter_type:
         all_chunks = [c for c in all_chunks if c.get("metadata", {}).get("file_type") == filter_type]
 
-    # Score and rank
-    scored = []
+    # 3. Score and rank — with early exit and hard timeout
+    scored: list[dict] = []
+    high_quality_count = 0
+    start_time = time.monotonic()
+    timed_out = False
+
     for chunk in all_chunks:
+        # Hard timeout check (Windows-compatible, no signal)
+        elapsed = time.monotonic() - start_time
+        if elapsed >= JSON_SCORING_TIMEOUT_SECS:
+            timed_out = True
+            break
+
         text = chunk.get("text", "")
         meta = chunk.get("metadata", {})
         file_path = meta.get("file_path", "")
@@ -175,9 +228,24 @@ def query_memory(
                 "chunk_index": meta.get("chunk_index", 0),
                 "file_type": meta.get("file_type", "unknown"),
             })
+            if score >= HIGH_RELEVANCE_THRESHOLD:
+                high_quality_count += 1
+
+        # Early exit: enough high-quality results — no need to score all chunks
+        if high_quality_count >= top_k * 2:
+            break
 
     scored.sort(key=lambda r: r["relevance_pct"], reverse=True)
-    return scored[:top_k]
+    results = scored[:top_k]
+
+    # Attach a warning if the search was cut short by timeout
+    if timed_out and results:
+        results[0]["_warning"] = (
+            f"JSON scoring timed out after {JSON_SCORING_TIMEOUT_SECS}s. "
+            "Results may be incomplete. Use a narrower branch or query."
+        )
+
+    return results
 
 
 def main():
@@ -200,6 +268,10 @@ def main():
     if not results:
         print("No results found.")
         return
+
+    # Print timeout warning if present
+    if results and results[0].get("_warning"):
+        print(f"⚠️  {results[0]['_warning']}\n")
 
     print(f"Found {len(results)} results:\n")
     for i, r in enumerate(results, 1):

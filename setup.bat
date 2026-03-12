@@ -14,6 +14,18 @@ echo.
 
 cd /d "%~dp0"
 
+REM --- Python version check ---
+python -c "import sys; v=sys.version_info; exit(0 if v.major==3 and v.minor<=13 else 1)" 2>nul
+if %ERRORLEVEL% NEQ 0 (
+    echo.
+    echo   WARNING: Python 3.14+ detected. ChromaDB requires Python 3.12 or 3.13.
+    echo   Download Python 3.12 from https://www.python.org/downloads/release/python-3120/
+    echo   HiveMind will run with reduced performance using JSON fallback.
+    echo   See UPGRADE_PYTHON.md for migration instructions.
+    echo.
+    pause
+)
+
 REM --- Python virtual environment ---
 echo [1/4] Creating Python virtual environment...
 if not exist .venv (

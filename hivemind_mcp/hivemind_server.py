@@ -4,12 +4,19 @@ HiveMind MCP Server
 Model Context Protocol server that exposes all HiveMind Python tools
 as native MCP tools for GitHub Copilot.
 
+All tool wrappers are async and run the underlying synchronous Python
+tools via ``asyncio.to_thread`` so that one slow tool never blocks
+another.  Each tool call has a configurable per-tool timeout (default
+60 s) — if a tool exceeds the timeout its ``asyncio.Task`` is cancelled
+and a friendly error message is returned instead of hanging forever.
+
 Usage:
-    python mcp/hivemind_server.py          # Run as stdio MCP server
-    python mcp/hivemind_server.py --test   # Validate all imports and exit
+    python hivemind_mcp/hivemind_server.py          # Run as stdio MCP server
+    python hivemind_mcp/hivemind_server.py --test   # Validate all imports and exit
 """
 
 import argparse
+import asyncio
 import json
 import sys
 from pathlib import Path
@@ -37,10 +44,28 @@ from tools.set_client import set_active_client, get_active_client, list_clients
 from tools.write_file import write_file
 
 # ---------------------------------------------------------------------------
+# ChromaDB availability check (printed once at import time)
+# ---------------------------------------------------------------------------
+try:
+    import chromadb  # noqa: F401
+    CHROMADB_AVAILABLE = True
+except ImportError:
+    CHROMADB_AVAILABLE = False
+    print("⚠️  WARNING: ChromaDB not available. Using JSON fallback (slower).", file=sys.stderr)
+    print("   Fix: Use Python 3.12/3.13 and run: pip install chromadb", file=sys.stderr)
+    print(f"   Current Python: {sys.version}", file=sys.stderr)
+
+# ---------------------------------------------------------------------------
 # Memory file paths
 # ---------------------------------------------------------------------------
 ACTIVE_CLIENT_FILE = PROJECT_ROOT / "memory" / "active_client.txt"
 ACTIVE_BRANCH_FILE = PROJECT_ROOT / "memory" / "active_branch.txt"
+
+# ---------------------------------------------------------------------------
+# Per-tool timeout (seconds).  Any tool exceeding this limit will return a
+# timeout error rather than blocking the server indefinitely.
+# ---------------------------------------------------------------------------
+TOOL_TIMEOUT_SECS = 60
 
 # ---------------------------------------------------------------------------
 # Create the MCP server
@@ -70,12 +95,37 @@ def _format_result(result) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Helper: run a blocking tool function with a timeout
+# ---------------------------------------------------------------------------
+async def _run_with_timeout(func, *args, timeout: int = TOOL_TIMEOUT_SECS, **kwargs):
+    """
+    Execute *func* in a thread-pool thread with an asyncio timeout.
+
+    If the function completes before *timeout* seconds its return value is
+    passed through.  On timeout, a human-readable error dict is returned
+    so the caller never sees an unhandled exception.
+    """
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(func, *args, **kwargs),
+            timeout=timeout,
+        )
+    except asyncio.TimeoutError:
+        return {
+            "error": (
+                f"Tool timed out after {timeout}s. "
+                "Try a more specific query or narrower branch filter."
+            )
+        }
+
+
+# ---------------------------------------------------------------------------
 # MCP Tool definitions — each wraps an existing Python tool
 # ---------------------------------------------------------------------------
 
 
 @mcp_server.tool()
-def hivemind_query_memory(
+async def hivemind_query_memory(
     client: str,
     query: str,
     branch: str = None,
@@ -99,7 +149,8 @@ def hivemind_query_memory(
         top_k: Number of results to return (default 5).
     """
     try:
-        result = query_memory(
+        result = await _run_with_timeout(
+            query_memory,
             client=client,
             query=query,
             branch=branch,
@@ -112,7 +163,7 @@ def hivemind_query_memory(
 
 
 @mcp_server.tool()
-def hivemind_query_graph(
+async def hivemind_query_graph(
     client: str,
     entity: str,
     direction: str = "both",
@@ -136,7 +187,8 @@ def hivemind_query_graph(
         branch: Optional branch filter.
     """
     try:
-        result = query_graph(
+        result = await _run_with_timeout(
+            query_graph,
             client=client,
             entity=entity,
             direction=direction,
@@ -149,7 +201,7 @@ def hivemind_query_graph(
 
 
 @mcp_server.tool()
-def hivemind_get_entity(
+async def hivemind_get_entity(
     client: str,
     name: str,
     branch: str = None,
@@ -168,14 +220,19 @@ def hivemind_get_entity(
         branch: Optional branch filter.
     """
     try:
-        result = get_entity(client=client, name=name, branch=branch)
+        result = await _run_with_timeout(
+            get_entity,
+            client=client,
+            name=name,
+            branch=branch,
+        )
         return _format_result(result)
     except Exception as e:
         return json.dumps({"error": str(e)})
 
 
 @mcp_server.tool()
-def hivemind_search_files(
+async def hivemind_search_files(
     client: str,
     query: str = "",
     file_type: str = None,
@@ -197,7 +254,8 @@ def hivemind_search_files(
         limit: Maximum results (default 25).
     """
     try:
-        result = search_files(
+        result = await _run_with_timeout(
+            search_files,
             client=client,
             query=query,
             file_type=file_type,
@@ -211,7 +269,7 @@ def hivemind_search_files(
 
 
 @mcp_server.tool()
-def hivemind_get_pipeline(
+async def hivemind_get_pipeline(
     client: str,
     name: str = None,
     file: str = None,
@@ -232,7 +290,8 @@ def hivemind_get_pipeline(
         branch: Optional branch filter.
     """
     try:
-        result = get_pipeline(
+        result = await _run_with_timeout(
+            get_pipeline,
             client=client,
             name=name,
             file=file,
@@ -245,7 +304,7 @@ def hivemind_get_pipeline(
 
 
 @mcp_server.tool()
-def hivemind_get_secret_flow(
+async def hivemind_get_secret_flow(
     client: str,
     secret: str,
     branch: str = None,
@@ -265,14 +324,19 @@ def hivemind_get_secret_flow(
         branch: Optional branch filter.
     """
     try:
-        result = get_secret_flow(client=client, secret=secret, branch=branch)
+        result = await _run_with_timeout(
+            get_secret_flow,
+            client=client,
+            secret=secret,
+            branch=branch,
+        )
         return _format_result(result)
     except Exception as e:
         return json.dumps({"error": str(e)})
 
 
 @mcp_server.tool()
-def hivemind_impact_analysis(
+async def hivemind_impact_analysis(
     client: str,
     file: str = None,
     entity: str = None,
@@ -297,7 +361,8 @@ def hivemind_impact_analysis(
         depth: Traversal depth for transitive dependencies (default 3).
     """
     try:
-        result = impact_analysis(
+        result = await _run_with_timeout(
+            impact_analysis,
             client=client,
             file=file,
             entity=entity,
@@ -311,7 +376,7 @@ def hivemind_impact_analysis(
 
 
 @mcp_server.tool()
-def hivemind_diff_branches(
+async def hivemind_diff_branches(
     client: str,
     repo: str,
     base: str,
@@ -329,7 +394,8 @@ def hivemind_diff_branches(
         compare: Compare branch name (e.g. "release_26_3").
     """
     try:
-        result = diff_branches(
+        result = await _run_with_timeout(
+            diff_branches,
             client=client,
             repo=repo,
             base=base,
@@ -341,7 +407,7 @@ def hivemind_diff_branches(
 
 
 @mcp_server.tool()
-def hivemind_list_branches(
+async def hivemind_list_branches(
     client: str,
     repo: str = "all",
 ) -> str:
@@ -355,14 +421,18 @@ def hivemind_list_branches(
         repo: Repository name, or "all" for all repos (default "all").
     """
     try:
-        result = list_branches(client=client, repo=repo)
+        result = await _run_with_timeout(
+            list_branches,
+            client=client,
+            repo=repo,
+        )
         return _format_result(result)
     except Exception as e:
         return json.dumps({"error": str(e)})
 
 
 @mcp_server.tool()
-def hivemind_set_client(
+async def hivemind_set_client(
     client: str,
 ) -> str:
     """Switch the active client context.
@@ -374,14 +444,17 @@ def hivemind_set_client(
         client: Client name to activate (e.g. "dfin").
     """
     try:
-        result = set_active_client(client=client)
+        result = await _run_with_timeout(
+            set_active_client,
+            client=client,
+        )
         return _format_result(result)
     except Exception as e:
         return json.dumps({"error": str(e)})
 
 
 @mcp_server.tool()
-def hivemind_write_file(
+async def hivemind_write_file(
     client: str,
     repo_name: str,
     branch: str,
@@ -404,7 +477,8 @@ def hivemind_write_file(
         intent: Optional description of the change intent.
     """
     try:
-        result = write_file(
+        result = await _run_with_timeout(
+            write_file,
             client=client,
             repo_name=repo_name,
             branch=branch,
@@ -418,7 +492,7 @@ def hivemind_write_file(
 
 
 @mcp_server.tool()
-def hivemind_get_active_client() -> str:
+async def hivemind_get_active_client() -> str:
     """Get the currently active client name.
 
     Reads from memory/active_client.txt. Call this FIRST before any other
@@ -438,7 +512,7 @@ def hivemind_get_active_client() -> str:
 
 
 @mcp_server.tool()
-def hivemind_get_active_branch() -> str:
+async def hivemind_get_active_branch() -> str:
     """Get the currently active branch.
 
     Reads from memory/active_branch.txt. Use this to know which branch
