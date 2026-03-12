@@ -145,21 +145,29 @@ Always label results with `[branch: {name}]` when showing cross-branch data.
 
 Before any investigation, comparison, or analysis involving a specific branch:
 
-1. Call `list_branches` (or `hivemind_list_branches`) to get all indexed branches for the relevant repo(s)
-2. If the requested branch is **NOT** in the indexed list, **STOP** and respond:
+1. Call `check_branch(client, repo, branch)` (or `hivemind_check_branch`) before any branch-specific work
+2. If `indexed=true` → proceed normally
+3. If `indexed=false` AND `exists_on_remote=true` → **STOP** and ask the user:
    ```
-   ⚠️ Branch `<branch>` is not indexed for `<repo>`.
-   Indexed branches are: <list>
-   Should I:
-   (a) Index it now — run: python ingest/crawl_repos.py --client <client> --config clients/<client>/repos.yaml --branch <branch>
-   (b) Use a different branch — which one?
-   (c) Proceed with closest available branch — `<suggestion>`?
+   ⚠️ `<branch>` exists in `<repo>` but isn't indexed yet.
+   Index it now? (recommended — ~2-3 mins)
+   Or use closest indexed branch: `<suggestion>`?
    ```
-3. **Never assume or substitute a branch without explicit user confirmation**
-4. **Never silently fall back to a different branch** — this produces wrong analysis
-5. This rule applies to ALL agents: Investigator, Analyst, DevOps, Architect, Security, Planner
+   Wait for user confirmation before proceeding.
+   If user confirms indexing → tell user to run:
+   `python ingest/crawl_repos.py --client <client> --config clients/<client>/repos.yaml --branch <branch>`
+   Then re-run the investigation.
+4. If `indexed=false` AND `exists_on_remote=false` → **STOP** and ask:
+   ```
+   ⚠️ Branch `<branch>` not found in `<repo>` — not indexed and not on remote.
+   Did you mean one of: <indexed_branches>?
+   ```
+5. If `exists_on_remote="unknown"` (network error) → warn and offer indexed alternatives
+6. **NEVER** silently substitute a different branch
+7. **NEVER** assume the closest branch is correct without asking
+8. This rule applies to ALL agents: Investigator, Analyst, DevOps, Architect, Security, Planner
 
-**Why this matters:** Silently substituting a branch (e.g., using `release_12_18` when the user asked about `release_26_1`) produces an entire investigation based on wrong data. The user may not notice the substitution, leading to invalid conclusions.
+**Why this matters:** "Not indexed" does not mean "doesn't exist." The branch may exist on the remote but hasn't been fetched yet. Silently substituting a branch (e.g., using `release_12_18` when the user asked about `release_26_1`) produces an entire investigation based on wrong data.
 
 ---
 
@@ -206,14 +214,16 @@ Copilot can call these tools directly — no extension, slash commands, or parti
 | `hivemind_list_branches` | List indexed branches with tier classification |
 | `hivemind_set_client` | Switch the active client context |
 | `hivemind_write_file` | Write a file with branch protection enforcement |
+| `hivemind_check_branch` | **Pre-flight check** — verify branch is indexed / exists on remote |
 
 ### Tool Calling Workflow
 
 1. **Always call `hivemind_get_active_client` first** to know which client to pass to other tools
-2. **For any KB question** — call `hivemind_query_memory` first, then use specialised tools based on results
-3. **For create/modify tasks** — call read tools first to understand existing patterns, then generate content, then call `hivemind_write_file`
-4. **Stream your thinking** — explain which tools you are calling and why as you work
-5. **Cite file paths** from tool results in every answer
+2. **For any branch-specific query** — call `hivemind_check_branch` first to validate the branch exists and is indexed
+3. **For any KB question** — call `hivemind_query_memory` first, then use specialised tools based on results
+4. **For create/modify tasks** — call read tools first to understand existing patterns, then generate content, then call `hivemind_write_file`
+5. **Stream your thinking** — explain which tools you are calling and why as you work
+6. **Cite file paths** from tool results in every answer
 
 ### Tool Selection Guide
 
@@ -222,7 +232,7 @@ Copilot can call these tools directly — no extension, slash commands, or parti
 | "What does X do?" | `hivemind_query_memory` | `hivemind_get_entity` or `hivemind_get_pipeline` |
 | "What depends on X?" | `hivemind_query_graph` | `hivemind_impact_analysis` |
 | "Where is secret X used?" | `hivemind_get_secret_flow` | `hivemind_query_memory` |
-| "What changed between branches?" | `hivemind_diff_branches` | `hivemind_query_memory` |
+| "What changed between branches?" | `hivemind_check_branch` | `hivemind_diff_branches` then `hivemind_query_memory` |
 | "Find all X files" | `hivemind_search_files` | `hivemind_query_memory` |
 | "Create/update a file" | `hivemind_search_files` (read first) | `hivemind_write_file` |
 
@@ -258,6 +268,7 @@ Instead of slash commands, call the MCP tools directly:
 | User Intent | MCP Tool Call |
 |-------------|---------------|
 | Check system status | `hivemind_get_active_client()` then `hivemind_list_branches(client=...)` |
+| Validate a branch | `hivemind_check_branch(client="dfin", repo="Eastwood-terraform", branch="release_26_1")` |
 | List branches | `hivemind_list_branches(client="dfin")` |
 | Diff two branches | `hivemind_diff_branches(client="dfin", repo="Eastwood-terraform", base="main", compare="release_26_3")` |
 | Trace a secret | `hivemind_get_secret_flow(client="dfin", secret="automation-dev-dbauditservice")` |

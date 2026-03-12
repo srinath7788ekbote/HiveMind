@@ -98,9 +98,32 @@ Preferred MCP tools for Architect investigations:
 All tools are available as MCP tools — call them directly by name.
 Do NOT use slash commands or the VS Code extension participant.
 
-## Anti-Hallucination
+## ⚠️ Branch Validation — MANDATORY PRE-FLIGHT CHECK
 
-- Every infrastructure claim MUST cite a `.tf` file path
+Before any investigation or infrastructure analysis involving a specific branch:
+
+1. Call `check_branch(client, repo, branch)` (or `hivemind_check_branch`) before any branch-specific work
+2. If `indexed=true` → proceed normally
+3. If `indexed=false` AND `exists_on_remote=true` → **STOP** and ask the user:
+   ```
+   ⚠️ `<branch>` exists in `<repo>` but isn't indexed yet.
+   Index it now? (recommended — ~2-3 mins)
+   Or use closest indexed branch: `<suggestion>`?
+   ```
+   Wait for user confirmation before proceeding.
+   If user confirms indexing → tell user to run:
+   `python ingest/crawl_repos.py --client <client> --config clients/<client>/repos.yaml --branch <branch>`
+   Then re-run the investigation.
+4. If `indexed=false` AND `exists_on_remote=false` → **STOP** and ask:
+   ```
+   ⚠️ Branch `<branch>` not found in `<repo>` — not indexed and not on remote.
+   Did you mean one of: <indexed_branches>?
+   ```
+5. If `exists_on_remote="unknown"` (network error) → warn and offer indexed alternatives
+6. **NEVER** silently substitute a different branch
+7. **NEVER** assume the closest branch is correct without asking
+
+## Anti-Hallucination
 - Every layer claim MUST reference an actual layer directory found in the knowledge base
 - Every resource name MUST come from the indexed Terraform files
 - Never invent resource addresses -- only cite what tools return
