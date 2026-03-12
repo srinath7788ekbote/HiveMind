@@ -37,14 +37,17 @@ HiveMind sits between your repos and GitHub Copilot. It ingests your infrastruct
 
 ## Requirements
 
-- **Python 3.10+** (Windows)
+- **Python 3.12 or 3.13** (Windows) — **NOT 3.14+** (ChromaDB requires < 3.14)
+  - To check: `python --version`
+  - To install 3.12: https://www.python.org/downloads/release/python-3120/
+  - See [UPGRADE_PYTHON.md](UPGRADE_PYTHON.md) for migration guide
 - **Node.js 18+** (for VS Code extension)
 - **VS Code** with GitHub Copilot Chat
 - **Git** in PATH
 
 Optional (graceful fallbacks exist):
 - **PyYAML** — better YAML parsing (fallback: regex parser)
-- **ChromaDB** — vector search (fallback: JSON keyword search)
+- **ChromaDB** — vector search (fallback: JSON keyword search — significantly slower on large knowledge bases)
 
 ## Quick Start
 
