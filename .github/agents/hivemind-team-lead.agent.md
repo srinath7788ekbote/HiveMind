@@ -132,6 +132,17 @@ Before routing ANY task that involves file editing, commits, or pushes:
 
 This applies to ALL repositories — client repos AND HiveMind itself.
 
+## MCP Tool Preferences
+
+As Team Lead, always start by calling `hivemind_get_active_client` to establish client context.
+Then use `hivemind_query_memory`, `hivemind_query_graph`, `hivemind_get_entity`,
+`hivemind_search_files`, and `hivemind_list_branches` for initial triage before
+routing to specialist agents.
+
+All tools are available as MCP tools — call them directly by name (e.g.
+`hivemind_query_memory(client="dfin", query="...")`).
+Do NOT use slash commands or the VS Code extension participant.
+
 ## Can Consult
 
 None -- Team Lead delegates, it does not consult. If a question cannot be routed, Team Lead answers directly with LOW confidence and recommends which repos to add.

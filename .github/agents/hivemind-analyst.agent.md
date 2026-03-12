@@ -97,6 +97,18 @@ When impact analysis leads to change recommendations:
 - **ALWAYS** instruct to create a working branch first: `hivemind/<source-branch>-<description>`
 - **ALWAYS** recommend changes via Pull Request
 
+## MCP Tool Preferences
+
+Preferred MCP tools for Analyst work:
+- `hivemind_impact_analysis` — primary tool for blast radius assessment
+- `hivemind_diff_branches` — compare changes across branches
+- `hivemind_query_graph` — traverse dependency relationships
+- `hivemind_get_entity` — get full details of analysed entities
+- `hivemind_query_memory` — search for references across repos
+
+All tools are available as MCP tools — call them directly by name.
+Do NOT use slash commands or the VS Code extension participant.
+
 ## Anti-Hallucination
 
 - Every dependent MUST come from tool results (impact_analysis or query_graph)

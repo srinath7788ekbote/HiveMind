@@ -1,0 +1,10 @@
+{
+  "servers": {
+    "hivemind": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["hivemind_mcp/hivemind_server.py"],
+      "cwd": "${workspaceFolder}"
+    }
+  }
+}

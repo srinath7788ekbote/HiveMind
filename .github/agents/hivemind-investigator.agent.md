@@ -126,6 +126,19 @@ When recommending remediation that involves file changes:
 - **ALWAYS** instruct to create a working branch first: `hivemind/<source-branch>-<description>`
 - **ALWAYS** recommend fixes via Pull Request to the target branch
 
+## MCP Tool Preferences
+
+Preferred MCP tools for Investigator work:
+- `hivemind_query_memory` — search for error patterns and related content
+- `hivemind_query_graph` — trace dependency chains from failing components
+- `hivemind_impact_analysis` — understand what else is affected
+- `hivemind_get_pipeline` — examine pipeline stages for failures
+- `hivemind_get_secret_flow` — trace secret chains for access errors
+- `hivemind_search_files` — find configuration files related to failures
+
+All tools are available as MCP tools — call them directly by name.
+Do NOT use slash commands or the VS Code extension participant.
+
 ## Anti-Hallucination
 
 - Every finding in the trace MUST cite a file path from tool results
