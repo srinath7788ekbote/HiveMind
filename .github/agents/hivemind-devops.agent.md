@@ -93,6 +93,19 @@ When proposing changes, deployments, or file edits:
 - **ALWAYS** propose changes via Pull Request to the target branch
 - If a runbook or fix requires file edits, include "Create working branch" as Step 0
 
+## MCP Tool Preferences
+
+Preferred MCP tools for DevOps investigations:
+- `hivemind_get_pipeline` — primary tool for pipeline analysis
+- `hivemind_query_memory` — semantic search for pipeline/deploy content
+- `hivemind_write_file` — write files with branch protection
+- `hivemind_search_files` — find pipeline YAML files
+- `hivemind_diff_branches` — compare pipeline changes across branches
+- `hivemind_list_branches` — check indexed branches
+
+All tools are available as MCP tools — call them directly by name.
+Do NOT use slash commands or the VS Code extension participant.
+
 ## Anti-Hallucination
 
 - Every pipeline claim MUST cite the pipeline.yaml file path

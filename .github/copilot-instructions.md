@@ -124,8 +124,8 @@ These rules are absolute. Violating any one invalidates the response.
 
 ## 3. Branch Awareness Rules
 
-- The **active branch** is written to `memory/active_branch.txt` by the VS Code extension whenever a file is opened or the branch changes.
-- The **active client** is written to `memory/active_client.txt`.
+- The **active branch** is written to `memory/active_branch.txt` — call `hivemind_get_active_branch` to read it.
+- The **active client** is written to `memory/active_client.txt` — call `hivemind_get_active_client` to read it.
 - **Default query behavior:** search `develop` + all `release_*` branches, label each result with its branch.
 - If the user specifies a branch explicitly (e.g., "on develop", "in release_26_1"), use that branch only.
 
@@ -147,10 +147,11 @@ Always label results with `[branch: {name}]` when showing cross-branch data.
 
 Before answering any question about infrastructure, services, pipelines, or environments:
 
-1. The active client is in `memory/active_client.txt`
-2. Read `memory/clients/{client}/discovered_profile.yaml` -- this contains the auto-discovered architecture: services, environments, Terraform layers, naming conventions, secret patterns
-3. Do NOT assume any architecture details not found in this file
-4. If `discovered_profile.yaml` is missing: tell the user to run `start_hivemind.bat` first
+1. Call `hivemind_get_active_client` to determine the current client
+2. Call `hivemind_query_memory` with the client name to search the knowledge base
+3. Read `memory/clients/{client}/discovered_profile.yaml` -- this contains the auto-discovered architecture: services, environments, Terraform layers, naming conventions, secret patterns
+4. Do NOT assume any architecture details not found in this file
+5. If `discovered_profile.yaml` is missing: tell the user to run `start_hivemind.bat` first
 
 The discovered profile contains:
 - **services**: All discovered services with source repos
@@ -163,24 +164,47 @@ The discovered profile contains:
 
 ---
 
-## 5. Skill Invocation Instruction
+## 5. MCP Tool Calling Instruction
 
-HiveMind skills are available for knowledge base queries.
-When you need infrastructure facts, always invoke the relevant skill first:
+HiveMind tools are exposed as MCP tools via the HiveMind MCP server.
+Copilot can call these tools directly — no extension, slash commands, or participant needed.
 
-| Need | Skill |
-|------|-------|
-| Searching for files/pipelines/services | **query-memory** skill |
-| Finding dependencies/relationships | **query-graph** skill |
-| Full entity details | **get-entity** skill |
-| Exact file/pattern search | **search-files** skill |
-| Pipeline stage breakdown | **get-pipeline** skill |
-| Tracing secret lifecycle | **get-secret-flow** skill |
-| Impact of a change | **impact-analysis** skill |
-| Comparing branches | **diff-branches** skill |
-| Listing indexed branches | **list-branches** skill |
+### Available MCP Tools
 
-Run the skill. Include its output as evidence. Then synthesize your answer.
+| MCP Tool | Purpose |
+|----------|---------|
+| `hivemind_get_active_client` | Get the current client name — **call this FIRST** |
+| `hivemind_get_active_branch` | Get the current active branch |
+| `hivemind_query_memory` | Semantic search over indexed KB (Terraform, pipelines, Helm, etc.) |
+| `hivemind_query_graph` | Traverse entity relationship graph |
+| `hivemind_get_entity` | Look up a specific entity by name |
+| `hivemind_search_files` | Search for indexed files by name, type, or repo |
+| `hivemind_get_pipeline` | Deep-parse a Harness pipeline YAML |
+| `hivemind_get_secret_flow` | Trace secret lifecycle (KV -> K8s -> Helm -> Pod) |
+| `hivemind_impact_analysis` | Blast radius assessment for an entity or file |
+| `hivemind_diff_branches` | Compare two branches of a repository |
+| `hivemind_list_branches` | List indexed branches with tier classification |
+| `hivemind_set_client` | Switch the active client context |
+| `hivemind_write_file` | Write a file with branch protection enforcement |
+
+### Tool Calling Workflow
+
+1. **Always call `hivemind_get_active_client` first** to know which client to pass to other tools
+2. **For any KB question** — call `hivemind_query_memory` first, then use specialised tools based on results
+3. **For create/modify tasks** — call read tools first to understand existing patterns, then generate content, then call `hivemind_write_file`
+4. **Stream your thinking** — explain which tools you are calling and why as you work
+5. **Cite file paths** from tool results in every answer
+
+### Tool Selection Guide
+
+| Question Type | First Tool | Then |
+|---------------|-----------|------|
+| "What does X do?" | `hivemind_query_memory` | `hivemind_get_entity` or `hivemind_get_pipeline` |
+| "What depends on X?" | `hivemind_query_graph` | `hivemind_impact_analysis` |
+| "Where is secret X used?" | `hivemind_get_secret_flow` | `hivemind_query_memory` |
+| "What changed between branches?" | `hivemind_diff_branches` | `hivemind_query_memory` |
+| "Find all X files" | `hivemind_search_files` | `hivemind_query_memory` |
+| "Create/update a file" | `hivemind_search_files` (read first) | `hivemind_write_file` |
 
 ---
 
@@ -207,16 +231,18 @@ Sources
 Confidence: {HIGH|MEDIUM|LOW}
 ```
 
-### Special Command Responses
+### Query Examples
 
-| Command | Response Format |
-|---------|----------------|
-| `/status` | Client name, repo count, indexed branches, last sync time, chunk count, entity count |
-| `/branches` | Branch list with tier classification and last indexed timestamp |
-| `/diff {b1} {b2}` | Changed files grouped by repo, with change type (added/modified/deleted) |
-| `/secrets {service}` | Full secret chain diagram with all file paths |
-| `/impact {entity}` | Blast radius tree with risk level |
-| `/pipeline {name}` | Parsed pipeline with stages, steps, templateRefs, serviceRefs |
+Instead of slash commands, call the MCP tools directly:
+
+| User Intent | MCP Tool Call |
+|-------------|---------------|
+| Check system status | `hivemind_get_active_client()` then `hivemind_list_branches(client=...)` |
+| List branches | `hivemind_list_branches(client="dfin")` |
+| Diff two branches | `hivemind_diff_branches(client="dfin", repo="Eastwood-terraform", base="main", compare="release_26_3")` |
+| Trace a secret | `hivemind_get_secret_flow(client="dfin", secret="automation-dev-dbauditservice")` |
+| Check impact | `hivemind_impact_analysis(client="dfin", entity="audit-service")` |
+| Parse a pipeline | `hivemind_get_pipeline(client="dfin", name="deploy_audit")` |
 
 ---
 

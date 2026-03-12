@@ -90,6 +90,18 @@ When recommending fixes to RBAC, secrets, or identity configurations:
 - **ALWAYS** instruct to create a working branch first: `hivemind/<source-branch>-<description>`
 - **ALWAYS** recommend changes via Pull Request
 
+## MCP Tool Preferences
+
+Preferred MCP tools for Security investigations:
+- `hivemind_get_secret_flow` — primary tool for secret lifecycle tracing
+- `hivemind_query_memory` — semantic search for RBAC/identity content
+- `hivemind_query_graph` — trace identity -> role -> resource relationships
+- `hivemind_search_files` — find RBAC .tf files and secret definitions
+- `hivemind_get_entity` — look up specific identities or roles
+
+All tools are available as MCP tools — call them directly by name.
+Do NOT use slash commands or the VS Code extension participant.
+
 ## Anti-Hallucination
 
 - Every secret claim MUST trace the full chain with all 3 file paths (KV -> K8s -> Helm)

@@ -95,7 +95,7 @@ class TestAgentFiles(unittest.TestCase):
             "Anti-Hallucination",
             "Branch Awareness",
             "Client Architecture",
-            "Skill Invocation",
+            "MCP Tool Calling",
             "Response Format",
             "Agent Roster",
         ]

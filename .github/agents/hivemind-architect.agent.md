@@ -85,6 +85,19 @@ When recommending infrastructure changes:
 - **ALWAYS** instruct to create a working branch first: `hivemind/<source-branch>-<description>`
 - **ALWAYS** recommend Terraform changes via Pull Request
 
+## MCP Tool Preferences
+
+Preferred MCP tools for Architect investigations:
+- `hivemind_query_graph` — primary tool for dependency traversal
+- `hivemind_get_entity` — look up specific Terraform resources
+- `hivemind_impact_analysis` — blast radius for infra changes
+- `hivemind_search_files` — find .tf files
+- `hivemind_query_memory` — semantic search for infra content
+- `hivemind_diff_branches` — compare infra changes across branches
+
+All tools are available as MCP tools — call them directly by name.
+Do NOT use slash commands or the VS Code extension participant.
+
 ## Anti-Hallucination
 
 - Every infrastructure claim MUST cite a `.tf` file path
