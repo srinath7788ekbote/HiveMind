@@ -106,6 +106,23 @@ Preferred MCP tools for DevOps investigations:
 All tools are available as MCP tools — call them directly by name.
 Do NOT use slash commands or the VS Code extension participant.
 
+## ⚠️ Branch Validation — MANDATORY PRE-FLIGHT CHECK
+
+Before any investigation or pipeline lookup involving a specific branch:
+
+1. Call `list_branches` (or `hivemind_list_branches`) to get all indexed branches for the relevant repo(s)
+2. If the requested branch is **NOT** in the indexed list, **STOP** and respond:
+   ```
+   ⚠️ Branch `<branch>` is not indexed for `<repo>`.
+   Indexed branches are: <list>
+   Should I:
+   (a) Index it now — run: python ingest/crawl_repos.py --client <client> --config clients/<client>/repos.yaml --branch <branch>
+   (b) Use a different branch — which one?
+   (c) Proceed with closest available branch — `<suggestion>`?
+   ```
+3. **Never assume or substitute a branch without explicit user confirmation**
+4. **Never silently fall back to a different branch** — this produces wrong analysis
+
 ## Anti-Hallucination
 
 - Every pipeline claim MUST cite the pipeline.yaml file path
