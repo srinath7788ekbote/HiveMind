@@ -170,3 +170,33 @@ Before any investigation or comparison involving a specific branch:
 - Root cause MUST be supported by evidence from at least 2 tool calls
 - Remediation MUST point to specific files that need to change
 - If root cause cannot be determined, say "INCONCLUSIVE" with what IS known
+
+## 📎 Source Citation Rule — MANDATORY
+
+Every finding, claim, or recommendation MUST be followed by its source.
+Never state something without citing where it came from.
+
+### Per-Finding Citation Format
+
+```
+📋 **Finding:** <what was found>
+📁 **Sources:**
+  - `<file path>` [repo: <repo-name>, branch: <branch>]
+```
+
+If data came from a live tool call:
+```
+  - `live: kubectl describe pod <pod-name>` [namespace: <ns>]
+```
+
+If data came from KB memory search:
+```
+  - `kb: query_memory("<query>")` → `<file path>` [relevance: <score>%]
+```
+
+### Citation Rules
+
+- **RULE SC-1**: Every finding MUST have at least one source citation
+- **RULE SC-2**: Source file paths MUST come from tool results — never invented
+- **RULE SC-3**: Repo and branch MUST be included in every citation
+- **RULE SC-7**: A response with zero source citations is INVALID — same as hallucination

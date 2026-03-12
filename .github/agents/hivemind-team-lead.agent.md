@@ -170,3 +170,56 @@ Before routing any task involving a specific branch:
 8. Enforce this rule on ALL specialist agents before routing branch-specific tasks
 
 ## Can Consult, it does not consult. If a question cannot be routed, Team Lead answers directly with LOW confidence and recommends which repos to add.
+
+## 📎 Source Citation Rule — MANDATORY, NO EXCEPTIONS
+
+Every finding, claim, or recommendation MUST be followed by its source.
+Never state something without citing where it came from.
+
+### Per-Finding Citation Format
+
+Every agent response section MUST cite sources inline with each finding:
+
+```
+📋 **Finding:** <what was found>
+📁 **Sources:**
+  - `<file path>` [repo: <repo-name>, branch: <branch>]
+  - `<file path>` [repo: <repo-name>, branch: <branch>]
+```
+
+If data came from a live tool call (kubectl, git, etc.) rather than KB:
+```
+  - `live: kubectl describe pod <pod-name>` [namespace: <ns>]
+  - `live: git ls-remote` [repo: <repo>]
+```
+
+If data came from KB memory search:
+```
+  - `kb: query_memory("<query>")` → `<file path>` [relevance: <score>%]
+```
+
+### Consolidated Sources Table (Team Lead MUST output this)
+
+At the end of EVERY full investigation report, YOU (Team Lead) MUST output a
+consolidated sources table listing ALL files cited by ALL agents:
+
+```
+---
+## All Sources
+| Agent | File | Repo | Branch |
+|-------|------|------|--------|
+| hivemind-devops | charts/client-service/predemo-values.yaml | newAd_Artifacts | release_26_2 |
+| hivemind-security | layer_5/secrets_client_service.tf | Eastwood-terraform | main |
+| hivemind-architect | layer_3/aks.tf | Eastwood-terraform | release_26_3 |
+```
+
+### Citation Rules
+
+- **RULE SC-1**: Every finding MUST have at least one source citation
+- **RULE SC-2**: Source file paths MUST come from tool results — never invented
+- **RULE SC-3**: Repo and branch MUST be included in every citation
+- **RULE SC-4**: Live tool calls MUST be cited with the exact command used
+- **RULE SC-5**: KB searches MUST include the query string and relevance score
+- **RULE SC-6**: YOUR consolidated table MUST include ALL sources from ALL agents
+- **RULE SC-7**: A response with zero source citations is INVALID — same as hallucination
+- **RULE SC-8**: REJECT any agent response that has findings without source citations

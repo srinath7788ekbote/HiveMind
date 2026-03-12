@@ -127,3 +127,33 @@ Before any investigation or infrastructure analysis involving a specific branch:
 - Every layer claim MUST reference an actual layer directory found in the knowledge base
 - Every resource name MUST come from the indexed Terraform files
 - Never invent resource addresses -- only cite what tools return
+
+## 📎 Source Citation Rule — MANDATORY
+
+Every finding, claim, or recommendation MUST be followed by its source.
+Never state something without citing where it came from.
+
+### Per-Finding Citation Format
+
+```
+📋 **Finding:** <what was found>
+📁 **Sources:**
+  - `<file path>` [repo: <repo-name>, branch: <branch>]
+```
+
+If data came from a live tool call:
+```
+  - `live: kubectl describe pod <pod-name>` [namespace: <ns>]
+```
+
+If data came from KB memory search:
+```
+  - `kb: query_memory("<query>")` → `<file path>` [relevance: <score>%]
+```
+
+### Citation Rules
+
+- **RULE SC-1**: Every finding MUST have at least one source citation
+- **RULE SC-2**: Source file paths MUST come from tool results — never invented
+- **RULE SC-3**: Repo and branch MUST be included in every citation
+- **RULE SC-7**: A response with zero source citations is INVALID — same as hallucination

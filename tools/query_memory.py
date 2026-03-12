@@ -119,7 +119,8 @@ def query_memory(
 
     Returns:
         List of result dicts with keys:
-            text, file_path, repo, branch, relevance_pct, chunk_index, file_type
+            text, file_path, repo, branch, relevance_pct, chunk_index, file_type,
+            source_citation  (pre-formatted citation string for agent responses)
     """
     mem_dir = PROJECT_ROOT / "memory" / client
 
@@ -155,14 +156,18 @@ def query_memory(
 
                     for doc, meta, dist in zip(docs, metas, distances):
                         relevance = max(0, 1.0 - dist) * 100
+                        fp = meta.get("file_path", "")
+                        rp = meta.get("repo", "")
+                        br = meta.get("branch", "default")
                         all_results.append({
                             "text": doc,
-                            "file_path": meta.get("file_path", ""),
-                            "repo": meta.get("repo", ""),
-                            "branch": meta.get("branch", "default"),
+                            "file_path": fp,
+                            "repo": rp,
+                            "branch": br,
                             "relevance_pct": round(relevance, 1),
                             "chunk_index": meta.get("chunk_index", 0),
                             "file_type": meta.get("file_type", "unknown"),
+                            "source_citation": f"[Source: {fp} | repo: {rp} | branch: {br} | relevance: {round(relevance, 1)}%]",
                         })
             except Exception:
                 continue
@@ -219,14 +224,19 @@ def query_memory(
         file_path = meta.get("file_path", "")
         score = _simple_relevance(query, text, file_path)
         if score > 0:
+            fp = meta.get("file_path", "")
+            rp = meta.get("repo", "")
+            br = meta.get("branch", "default")
+            rel_pct = round(score * 100, 1)
             scored.append({
                 "text": text,
-                "file_path": meta.get("file_path", ""),
-                "repo": meta.get("repo", ""),
-                "branch": meta.get("branch", "default"),
-                "relevance_pct": round(score * 100, 1),
+                "file_path": fp,
+                "repo": rp,
+                "branch": br,
+                "relevance_pct": rel_pct,
                 "chunk_index": meta.get("chunk_index", 0),
                 "file_type": meta.get("file_type", "unknown"),
+                "source_citation": f"[Source: {fp} | repo: {rp} | branch: {br} | relevance: {rel_pct}%]",
             })
             if score >= HIGH_RELEVANCE_THRESHOLD:
                 high_quality_count += 1

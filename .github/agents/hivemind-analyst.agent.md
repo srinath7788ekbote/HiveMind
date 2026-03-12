@@ -140,3 +140,33 @@ Before any analysis or comparison involving a specific branch:
 - Risk level MUST be calculated from actual dependent count, not estimated
 - Every file path MUST be a real path from the knowledge base
 - If impact_analysis returns no results, say "NO DEPENDENTS FOUND" -- do not guess
+
+## 📎 Source Citation Rule — MANDATORY
+
+Every finding, claim, or recommendation MUST be followed by its source.
+Never state something without citing where it came from.
+
+### Per-Finding Citation Format
+
+```
+📋 **Finding:** <what was found>
+📁 **Sources:**
+  - `<file path>` [repo: <repo-name>, branch: <branch>]
+```
+
+If data came from a live tool call:
+```
+  - `live: kubectl describe pod <pod-name>` [namespace: <ns>]
+```
+
+If data came from KB memory search:
+```
+  - `kb: query_memory("<query>")` → `<file path>` [relevance: <score>%]
+```
+
+### Citation Rules
+
+- **RULE SC-1**: Every finding MUST have at least one source citation
+- **RULE SC-2**: Source file paths MUST come from tool results — never invented
+- **RULE SC-3**: Repo and branch MUST be included in every citation
+- **RULE SC-7**: A response with zero source citations is INVALID — same as hallucination

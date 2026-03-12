@@ -32,6 +32,67 @@ RULE 6: Every infrastructure claim needs a file path citation from the KB result
 
 ---
 
+## 1.1. 📎 SOURCE CITATION RULE — MANDATORY, NO EXCEPTIONS
+
+Every finding, claim, or recommendation MUST be followed by its source.
+Never state something without citing where it came from.
+
+### Per-Finding Citation Format
+
+Every agent response section MUST cite sources inline with each finding:
+
+```
+📋 **Finding:** <what was found>
+📁 **Sources:**
+  - `<file path>` [repo: <repo-name>, branch: <branch>]
+  - `<file path>` [repo: <repo-name>, branch: <branch>]
+```
+
+If data came from a live tool call (kubectl, git, etc.) rather than KB:
+```
+  - `live: kubectl describe pod <pod-name>` [namespace: <ns>]
+  - `live: git ls-remote` [repo: <repo>]
+```
+
+If data came from KB memory search:
+```
+  - `kb: query_memory("<query>")` → `<file path>` [relevance: <score>%]
+```
+
+### Consolidated Sources Table (Team Lead only)
+
+At the end of the full investigation report, the Team Lead MUST output a consolidated
+sources table listing ALL files cited by ALL agents:
+
+```
+---
+## All Sources
+| Agent | File | Repo | Branch |
+|-------|------|------|--------|
+| hivemind-devops | charts/client-service/predemo-values.yaml | newAd_Artifacts | release_26_2 |
+| hivemind-security | layer_5/secrets_client_service.tf | Eastwood-terraform | main |
+| hivemind-architect | layer_3/aks.tf | Eastwood-terraform | release_26_3 |
+```
+
+### Citation Rules
+
+- **RULE SC-1**: Every finding MUST have at least one source citation
+- **RULE SC-2**: Source file paths MUST come from tool results — never invented
+- **RULE SC-3**: Repo and branch MUST be included in every citation
+- **RULE SC-4**: Live tool calls MUST be cited with the exact command used
+- **RULE SC-5**: KB searches MUST include the query string and relevance score
+- **RULE SC-6**: The Team Lead's consolidated table MUST include ALL sources from ALL agents
+- **RULE SC-7**: A response with zero source citations is INVALID — same as hallucination
+
+### ❌ BANNED Citation Patterns
+
+- Findings without any source citation
+- File paths not returned by any tool call
+- "Based on typical configurations..." (no source = banned)
+- Omitting repo or branch from citations
+
+---
+
 ## 1.5. 🛡️ BRANCH PROTECTION — MANDATORY, NO EXCEPTIONS
 
 These rules prevent direct modifications to protected branches in ANY repository (client repos AND HiveMind itself).
@@ -244,19 +305,27 @@ Every response MUST follow this format:
 
 ```
 {Agent Name}
-  {findings with file path citations}
+  📋 Finding: {what was found}
+  📁 Sources:
+    - `{file/path1.yaml}` [repo: {repo}, branch: {branch}]
+    - `{file/path2.tf}` [repo: {repo}, branch: {branch}]
   -> Consulting {Other Agent} about {reason}...  (if applicable)
 
 {Other Agent} (consulted by {Agent Name})
-  {findings with file path citations}
+  📋 Finding: {what was found}
+  📁 Sources:
+    - `{file/path3.yaml}` [repo: {repo}, branch: {branch}]
 
 Answer
   {synthesized answer combining all agent findings}
 
-Sources
-  - {file/path1.yaml}
-  - {file/path2.tf}
-  - {file/path3.yaml}
+---
+## All Sources
+| Agent | File | Repo | Branch |
+|-------|------|------|--------|
+| {agent-name} | {file/path1.yaml} | {repo} | {branch} |
+| {agent-name} | {file/path2.tf} | {repo} | {branch} |
+| {other-agent} | {file/path3.yaml} | {repo} | {branch} |
 
 Confidence: {HIGH|MEDIUM|LOW}
 ```
