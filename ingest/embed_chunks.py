@@ -150,6 +150,27 @@ def _file_to_chunks(
     return results
 
 
+def _write_json_chunks(mem: Path, collection_name: str, all_chunks: list[dict]):
+    """Write chunks to JSON file for fallback search."""
+    json_store = mem / "vectors" / f"{collection_name}.json"
+    json_store.parent.mkdir(parents=True, exist_ok=True)
+
+    existing = {}
+    if json_store.exists():
+        try:
+            with open(json_store, 'r', encoding='utf-8') as f:
+                existing_list = json.load(f)
+                existing = {c["id"]: c for c in existing_list}
+        except (json.JSONDecodeError, OSError):
+            existing = {}
+
+    for chunk in all_chunks:
+        existing[chunk["id"]] = chunk
+
+    with open(json_store, 'w', encoding='utf-8') as f:
+        json.dump(list(existing.values()), f, indent=1)
+
+
 def embed_repo(
     repo_path: str,
     memory_dir: str,
@@ -213,42 +234,40 @@ def embed_repo(
     # Try to use ChromaDB for vector storage
     try:
         import chromadb
+        from ingest.fast_embed import embed_texts, get_chromadb_ef
+
+        ef = get_chromadb_ef()
         client = chromadb.PersistentClient(path=str(mem / "vectors"))
+
+        all_texts = [c["text"] for c in all_chunks]
+
+        # Pre-compute all embeddings (runs in seconds, not minutes)
+        all_embeddings = embed_texts(all_texts)
+
         collection = client.get_or_create_collection(
             name=collection_name,
             metadata={"hnsw:space": "cosine"},
+            embedding_function=ef,
         )
 
-        # Batch insert
-        batch_size = 100
+        # Upsert with pre-computed embeddings
+        batch_size = 500
         for i in range(0, len(all_chunks), batch_size):
             batch = all_chunks[i:i + batch_size]
+            batch_embeds = all_embeddings[i:i + batch_size]
             collection.upsert(
                 ids=[c["id"] for c in batch],
                 documents=[c["text"] for c in batch],
                 metadatas=[c["metadata"] for c in batch],
+                embeddings=batch_embeds,
             )
+
+        # Also write JSON for fallback / non-ChromaDB queries
+        _write_json_chunks(mem, collection_name, all_chunks)
+
     except ImportError:
         # Fallback: store as JSON for basic search
-        json_store = mem / "vectors" / f"{collection_name}.json"
-        json_store.parent.mkdir(parents=True, exist_ok=True)
-
-        # Load existing chunks if any
-        existing = {}
-        if json_store.exists():
-            try:
-                with open(json_store, 'r', encoding='utf-8') as f:
-                    existing_list = json.load(f)
-                    existing = {c["id"]: c for c in existing_list}
-            except (json.JSONDecodeError, OSError):
-                existing = {}
-
-        # Merge new chunks
-        for chunk in all_chunks:
-            existing[chunk["id"]] = chunk
-
-        with open(json_store, 'w', encoding='utf-8') as f:
-            json.dump(list(existing.values()), f, indent=1)
+        _write_json_chunks(mem, collection_name, all_chunks)
 
     return {
         "chunk_count": len(all_chunks),

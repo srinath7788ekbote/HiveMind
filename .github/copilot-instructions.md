@@ -276,6 +276,8 @@ Copilot can call these tools directly — no extension, slash commands, or parti
 | `hivemind_set_client` | Switch the active client context |
 | `hivemind_write_file` | Write a file with branch protection enforcement |
 | `hivemind_check_branch` | **Pre-flight check** — verify branch is indexed / exists on remote |
+| `hivemind_save_investigation` | Save a completed investigation to memory — use ONLY when user explicitly asks to save |
+| `hivemind_recall_investigation` | Search past saved investigations for similar incidents |
 
 ### Tool Calling Workflow
 
@@ -296,6 +298,8 @@ Copilot can call these tools directly — no extension, slash commands, or parti
 | "What changed between branches?" | `hivemind_check_branch` | `hivemind_diff_branches` then `hivemind_query_memory` |
 | "Find all X files" | `hivemind_search_files` | `hivemind_query_memory` |
 | "Create/update a file" | `hivemind_search_files` (read first) | `hivemind_write_file` |
+| "Have we seen this before?" | `hivemind_recall_investigation` | `hivemind_query_memory` |
+| "Save this investigation" | `hivemind_save_investigation` | (none) |
 
 ---
 
@@ -343,6 +347,8 @@ Instead of slash commands, call the MCP tools directly:
 | Trace a secret | `hivemind_get_secret_flow(client="dfin", secret="automation-dev-dbauditservice")` |
 | Check impact | `hivemind_impact_analysis(client="dfin", entity="audit-service")` |
 | Parse a pipeline | `hivemind_get_pipeline(client="dfin", name="deploy_audit")` |
+| Save investigation | `hivemind_save_investigation(client="dfin", service_name="audit-service", incident_type="CrashLoopBackOff", root_cause_summary="...", resolution="...", files_cited="[]", tags="spring-boot,aks")` |
+| Recall past incidents | `hivemind_recall_investigation(client="dfin", query="OOMKilled spring-boot")` |
 
 ---
 
@@ -366,3 +372,173 @@ When working as a HiveMind agent, you may receive handoff context from another a
 - Maximum **8 total consultations** per task
 - If a handoff brings context from another agent, use it -- do not re-query what they already found
 - When handing off, always include your current findings so the next agent has full context
+
+---
+
+## 8. 🚨 Automatic Incident Investigation Trigger
+
+When a user pastes logs, errors, or incident data, Copilot MUST automatically begin a full knowledge-base-driven investigation. **Do NOT wait for the user to ask.** The paste IS the request.
+
+### 8.1. Trigger Conditions — MANDATORY DETECTION
+
+Copilot MUST treat ANY of the following as an implicit incident investigation request:
+
+#### Keyword Triggers (case-insensitive, anywhere in message)
+
+| Category | Keywords |
+|----------|----------|
+| **Pod / Container** | `CrashLoopBackOff`, `OOMKilled`, `ImagePullBackOff`, `Pending`, `Evicted`, `Terminating`, `BackOff`, `ContainerCreating` |
+| **Probe / Network** | `probe failed`, `connection refused`, `connection timed out`, `dial tcp`, `i/o timeout`, `no such host`, `DNS resolution failed` |
+| **Process** | `panic`, `FATAL`, `SIGKILL`, `SIGTERM`, `exit code 1`, `exit code 137`, `exit code 143` |
+| **HTTP** | `5xx`, `502`, `503`, `504`, `timeout`, `gateway timeout`, `service unavailable` |
+| **General** | `Error`, `Exception`, `failed to`, `unable to`, `cannot`, `could not`, `not found`, `permission denied`, `access denied`, `unauthorized` |
+
+#### Pattern Triggers
+
+- **Stack traces**: multi-line text containing `at <namespace>.<class>`, `Traceback`, `File "..."`, `goroutine`, or indented call chains
+- **kubectl output**: text containing `kubectl`, `NAME  READY  STATUS`, `NAMESPACE`, `Events:`, `Conditions:`, or YAML with `kind:` / `apiVersion:`
+- **Structured logs**: JSON lines containing `"level":"error"`, `"level":"fatal"`, `"severity":"ERROR"`, or `"status":5xx`
+- **Timestamped logs**: multi-line text where lines begin with ISO timestamps (`2024-`, `2025-`, `2026-`) or syslog-style timestamps, followed by log levels (`ERROR`, `WARN`, `FATAL`, `CRITICAL`)
+- **Pod logs**: output resembling `kubectl logs` — multi-line, timestamped, referencing container or service names
+- **Azure / Cloud errors**: `ResourceNotFound`, `AuthorizationFailed`, `OperationNotAllowed`, `QuotaExceeded`, `SubscriptionNotFound`
+
+#### Threshold
+
+If **2 or more** keywords/patterns from the lists above appear in a single user message, the incident trigger is **CONFIRMED**. If only **1** keyword appears but the message contains multi-line log-like content, the trigger is still **CONFIRMED**.
+
+### 8.2. Mandatory Automatic Sequence — NO PERMISSION REQUIRED
+
+Upon trigger confirmation, execute this sequence **immediately**. Do NOT ask the user before starting.
+
+```
+STEP 1 — CONTEXT
+  Call hivemind_get_active_client()
+  → Determines which client KB to search
+
+STEP 2 — SIGNAL EXTRACTION
+  Parse the pasted content and extract:
+    • service_name  — from pod names, container names, namespace labels, log source fields
+    • error_type    — the specific error class (OOMKilled, connection refused, etc.)
+    • namespace     — Kubernetes namespace if present
+    • secrets_refs  — any Key Vault, secret, or config map references
+    • image_refs    — container image names and tags
+    • timestamps    — time range of the incident
+
+STEP 3 — KB SEARCH
+  Call hivemind_query_memory(client=<client>, query="<service_name> <error_type>")
+  Call hivemind_query_memory(client=<client>, query="<service_name> deployment configuration")
+  → Search for Helm values, Terraform config, pipeline definitions related to the service
+
+STEP 4 — ENTITY LOOKUP
+  IF service_name was extracted:
+    Call hivemind_get_entity(client=<client>, name="<service_name>")
+    → Get full entity metadata: repos, environments, dependencies
+
+STEP 5 — IMPACT ANALYSIS (NEVER SKIP)
+  Call hivemind_impact_analysis(client=<client>, entity="<service_name>")
+  → Get upstream/downstream dependency chain — this is CRITICAL for root cause
+
+STEP 6 — SECRET FLOW (conditional)
+  IF logs contain secret, KeyVault, config map, or credential errors:
+    Call hivemind_get_secret_flow(client=<client>, secret="<secret_name>")
+    → Trace full secret lifecycle: Key Vault → Kubernetes Secret → Helm → Pod
+
+STEP 7 — PIPELINE LOOKUP (conditional)
+  IF logs reference a deployment, rollout, release, or pipeline:
+    Call hivemind_get_pipeline(client=<client>, name="<pipeline_name>")
+    → Get pipeline definition, stages, approval gates, artifact sources
+
+STEP 8 — AGENT ROUTING
+  Route all gathered data to hivemind-investigator for root cause synthesis
+  (see Section 8.4 for routing rules)
+```
+
+### 8.3. ❌ NEVER Do These on Incident Paste
+
+- **NEVER** ask "Should I search the knowledge base?" — the answer is always YES
+- **NEVER** ask "Which service is this for?" — extract it from the logs or say what you assumed
+- **NEVER** give a generic Kubernetes / cloud answer from training data when KB results exist
+- **NEVER** skip Step 5 (impact analysis) — cross-repo dependencies are the #1 source of cascading root causes
+- **NEVER** answer with only what's visible in the logs — always cross-reference with KB (Helm values, Terraform config, pipeline definitions)
+- **NEVER** say "I can look into this if you'd like" — you MUST already be looking into it
+- **NEVER** output a partial investigation — complete all applicable steps before responding
+- **NEVER** assume the error is isolated to one service without checking the dependency chain
+
+### 8.4. Agent Routing Protocol for Incidents
+
+After automatic data gathering (Steps 1–7), route to specialist agents based on what the evidence implicates:
+
+| Evidence Points To | Primary Agent | Consult |
+|--------------------|---------------|---------|
+| Unknown root cause, multi-signal | **hivemind-investigator** | as needed |
+| Helm values, Docker image, deployment config | **hivemind-devops** | hivemind-investigator |
+| Terraform resource, AKS config, networking | **hivemind-architect** | hivemind-investigator |
+| Key Vault, secrets, RBAC, managed identity | **hivemind-security** | hivemind-investigator |
+| Cross-service cascading failure | **hivemind-analyst** | hivemind-investigator |
+| Needs a remediation runbook | **hivemind-planner** | hivemind-devops |
+
+**hivemind-team-lead** MUST consolidate the final answer from all consulted agents and produce the standardized output format (Section 8.5).
+
+### 8.5. Output Format for Automatic Investigations
+
+Every incident investigation response MUST use this exact structure:
+
+```
+## 🚨 INCIDENT DETECTED — Automatic Investigation
+
+### Signals Extracted
+| Signal | Value |
+|--------|-------|
+| Service | <extracted service name> |
+| Error Type | <error class> |
+| Namespace | <namespace or "not specified"> |
+| Time Range | <timestamps from logs or "not specified"> |
+| Severity | <CRITICAL / HIGH / MEDIUM based on error type> |
+
+### KB Findings
+
+**hivemind-investigator**
+  📋 Finding: <root cause analysis based on KB data>
+  📁 Sources:
+    - `<file path>` [repo: <repo>, branch: <branch>]
+
+**hivemind-{specialist}** (consulted by hivemind-investigator)
+  📋 Finding: <specialist findings>
+  📁 Sources:
+    - `<file path>` [repo: <repo>, branch: <branch>]
+
+### Dependency Chain
+<output from hivemind_impact_analysis — upstream and downstream services>
+
+### Root Cause Hypothesis
+📋 **Hypothesis:** <specific root cause statement, not generic>
+🎯 **Confidence:** HIGH | MEDIUM | LOW
+📁 **Evidence:**
+  - `<file1>` — <what this file shows>
+  - `<file2>` — <what this file shows>
+
+### Recommended Fix
+1. <specific action with exact file path to modify>
+2. <specific action with exact file path to modify>
+3. <verification step>
+
+---
+## All Sources
+| Agent | File | Repo | Branch |
+|-------|------|------|--------|
+| hivemind-investigator | <file1> | <repo> | <branch> |
+| hivemind-{specialist} | <file2> | <repo> | <branch> |
+
+🎯 Confidence: {HIGH|MEDIUM|LOW}
+```
+
+### 8.6. Graceful Degradation
+
+| Condition | Required Behavior |
+|-----------|-------------------|
+| Service name NOT extractable from logs | Use the strongest signal available (namespace, pod prefix, image name). State: `"⚠️ Service name inferred as '<name>' from <signal>. Correct me if wrong."` |
+| Service NOT found in KB | State: `"NOT IN KNOWLEDGE BASE — searched for: <service_name>. Queries attempted: <list>."` Then provide best-effort analysis from the logs alone with `🎯 Confidence: LOW`. |
+| Logs are ambiguous / multi-service | Run `hivemind_query_memory` for EACH candidate service. Present findings for all, ranked by match confidence. |
+| KB returns partial results | Present what was found with `🎯 Confidence: MEDIUM`. Explicitly list what is missing: `"⚠️ Missing from KB: <what was expected but not found>."` |
+| Multiple root cause candidates | Present each hypothesis as a numbered option with its own confidence level and evidence citations. Do NOT pick one without evidence. |
+| Tool call fails or times out | Log the failure, continue with remaining steps, and note: `"⚠️ Tool <tool_name> failed — <error>. Findings may be incomplete."` |

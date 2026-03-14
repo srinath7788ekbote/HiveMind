@@ -2,7 +2,7 @@
 # Install: pip install -r requirements.txt
 
 pyyaml>=6.0
-
-# Optional: ChromaDB for vector search (requires Python <3.14)
-# Falls back to JSON keyword search if unavailable.
-# chromadb>=1.5
+chromadb>=1.0
+mcp>=1.0
+pytest>=8.0
+rank_bm25>=0.2
