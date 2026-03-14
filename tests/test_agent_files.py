@@ -40,6 +40,10 @@ class TestAgentFiles(unittest.TestCase):
         "impact-analysis",
         "diff-branches",
         "list-branches",
+        "incident-triage",
+        "k8s-debug",
+        "secret-audit",
+        "postmortem",
     ]
 
     def test_all_agent_files_exist(self):

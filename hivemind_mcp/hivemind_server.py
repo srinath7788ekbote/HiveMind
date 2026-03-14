@@ -43,6 +43,8 @@ from tools.list_branches import list_branches
 from tools.set_client import set_active_client, get_active_client, list_clients
 from tools.write_file import write_file
 from tools.check_branch import check_branch
+from tools.save_investigation import save_investigation
+from tools.recall_investigation import recall_investigation
 
 # ---------------------------------------------------------------------------
 # ChromaDB availability check (printed once at import time)
@@ -497,6 +499,93 @@ async def hivemind_write_file(
 
 
 @mcp_server.tool()
+async def hivemind_save_investigation(
+    client: str,
+    service_name: str,
+    incident_type: str,
+    root_cause_summary: str,
+    resolution: str,
+    files_cited: str = "[]",
+    tags: str = "",
+) -> str:
+    """Save a completed investigation to memory for future recall.
+
+    Call ONLY when the user explicitly asks to save or remember the
+    investigation (e.g. "save this investigation", "remember the fix").
+    Never auto-save.
+
+    Args:
+        client: Client name (e.g. "dfin").
+        service_name: Primary service investigated.
+        incident_type: One of: CrashLoopBackOff, OOMKilled, SecretMount,
+            ProbeFailure, PipelineFailure, InfraFailure, AppStartup,
+            NetworkPolicy, ImagePull, Unknown.
+        root_cause_summary: 2-3 sentence factual summary of root cause.
+        resolution: What fix was applied or recommended.
+        files_cited: JSON string — list of {file_path, repo, branch, relevance}.
+        tags: Comma-separated searchable tags (e.g. "keyvault,spring-boot").
+    """
+    try:
+        parsed_files = []
+        if files_cited:
+            try:
+                parsed_files = json.loads(files_cited)
+            except (json.JSONDecodeError, TypeError):
+                parsed_files = []
+
+        parsed_tags = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+
+        result = await _run_with_timeout(
+            save_investigation,
+            client=client,
+            service_name=service_name,
+            incident_type=incident_type,
+            root_cause_summary=root_cause_summary,
+            resolution=resolution,
+            files_cited=parsed_files,
+            tags=parsed_tags,
+        )
+        return _format_result(result)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp_server.tool()
+async def hivemind_recall_investigation(
+    client: str,
+    query: str,
+    service_name: str = None,
+    incident_type: str = None,
+    top_k: int = 3,
+) -> str:
+    """Search past saved investigations for similar incidents.
+
+    Use when the user says 'have we seen this before', 'similar issue',
+    'last time this happened', or 'recall'. Also use at the start of
+    any new investigation to check for prior art.
+
+    Args:
+        client: Client name (e.g. "dfin").
+        query: Natural language search query.
+        service_name: Optional exact-match filter on service name.
+        incident_type: Optional exact-match filter on incident type.
+        top_k: Number of results to return (default 3).
+    """
+    try:
+        result = await _run_with_timeout(
+            recall_investigation,
+            client=client,
+            query=query,
+            service_name=service_name,
+            incident_type=incident_type,
+            top_k=top_k,
+        )
+        return _format_result(result)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp_server.tool()
 async def hivemind_check_branch(
     client: str,
     repo: str,
@@ -584,6 +673,8 @@ TOOL_REGISTRY = {
     "hivemind_get_active_client": hivemind_get_active_client,
     "hivemind_get_active_branch": hivemind_get_active_branch,
     "hivemind_check_branch": hivemind_check_branch,
+    "hivemind_save_investigation": hivemind_save_investigation,
+    "hivemind_recall_investigation": hivemind_recall_investigation,
 }
 
 
@@ -610,9 +701,9 @@ def run_self_test() -> bool:
     # Verify the FastMCP server has them registered
     registered_count = len(expected_tools)
     print()
-    print(f"Tools registered: {registered_count}/14")
+    print(f"Tools registered: {registered_count}/16")
 
-    if registered_count == 14 and all_ok:
+    if registered_count == 16 and all_ok:
         print("All tools healthy.")
         return True
     else:

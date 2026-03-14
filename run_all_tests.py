@@ -68,6 +68,7 @@ UNIT_TESTS = [
     "test_diff_branches",
     "test_list_branches",
     "test_mcp_server",
+    "test_skill_files",
 ]
 
 INTEGRATION_TESTS = [

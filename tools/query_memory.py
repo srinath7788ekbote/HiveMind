@@ -100,6 +100,79 @@ def _filter_vector_files_by_branch(
     return filtered if filtered else json_files
 
 
+# ---------------------------------------------------------------------------
+# BM25 search index (cached per client for process lifetime)
+# ---------------------------------------------------------------------------
+_bm25_cache: dict = {}  # client -> (bm25_index, all_chunks)
+
+
+def _tokenize_bm25(text: str, file_path: str = "") -> list[str]:
+    """Tokenize text for BM25 with infrastructure-aware splitting.
+
+    Splits on word boundaries and also expands hyphenated/underscored
+    compound names (e.g. "tagging-service" -> ["tagging-service", "tagging", "service"])
+    so that both exact compound matches and partial matches score well.
+    """
+    combined = text + " " + file_path
+    tokens = re.findall(r'[a-zA-Z0-9][a-zA-Z0-9_-]*', combined.lower())
+    expanded = []
+    for t in tokens:
+        expanded.append(t)
+        parts = re.split(r'[-_]', t)
+        if len(parts) > 1:
+            expanded.extend(p for p in parts if len(p) > 1)
+    return expanded
+
+
+def _get_bm25_index(vectors_dir: Path):
+    """Build or retrieve cached BM25 index for a vectors directory.
+
+    On first call, loads all JSON vector files and builds a BM25Okapi
+    index.  Subsequent calls return the cached index.
+
+    Uses the full directory path as cache key so that test patches to
+    PROJECT_ROOT produce isolated caches.
+    """
+    cache_key = str(vectors_dir)
+    if cache_key in _bm25_cache:
+        return _bm25_cache[cache_key]
+
+    if not vectors_dir.exists():
+        return None, []
+
+    all_chunks = []
+    for jf in sorted(vectors_dir.glob("*.json")):
+        try:
+            with open(jf, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    all_chunks.extend(data)
+        except (json.JSONDecodeError, OSError):
+            continue
+
+    if not all_chunks:
+        return None, []
+
+    tokenized = [
+        _tokenize_bm25(
+            c.get("text", ""),
+            c.get("metadata", {}).get("file_path", ""),
+        )
+        for c in all_chunks
+    ]
+
+    from rank_bm25 import BM25Plus
+    bm25 = BM25Plus(tokenized)
+    _bm25_cache[cache_key] = (bm25, all_chunks)
+    return bm25, all_chunks
+
+
+# ---------------------------------------------------------------------------
+# ChromaDB client cache (avoids 250ms+ PersistentClient creation per query)
+# ---------------------------------------------------------------------------
+_chromadb_clients: dict = {}  # vectors_path -> chromadb.PersistentClient
+
+
 def query_memory(
     client: str,
     query: str,
@@ -127,133 +200,116 @@ def query_memory(
     # Try ChromaDB first
     try:
         import chromadb
-        client_db = chromadb.PersistentClient(path=str(mem_dir / "vectors"))
+
+        vectors_path = str(mem_dir / "vectors")
+        if vectors_path not in _chromadb_clients:
+            _chromadb_clients[vectors_path] = chromadb.PersistentClient(path=vectors_path)
+        client_db = _chromadb_clients[vectors_path]
         collections = client_db.list_collections()
 
-        all_results = []
-        for col_info in collections:
-            col_name = col_info.name if hasattr(col_info, 'name') else str(col_info)
-            collection = client_db.get_collection(col_name)
+        if collections:
+            from ingest.fast_embed import embed_texts, get_chromadb_ef
 
-            # Build where filter
-            where_filter = {}
-            if branch:
-                where_filter["branch"] = branch
-            if filter_type:
-                where_filter["file_type"] = filter_type
+            ef = get_chromadb_ef()
+            # Embed the query with the same function used at ingest
+            query_embedding = embed_texts([query])[0]
 
-            try:
-                results = collection.query(
-                    query_texts=[query],
-                    n_results=top_k,
-                    where=where_filter if where_filter else None,
-                )
+            all_results = []
+            for col_info in collections:
+                col_name = col_info.name if hasattr(col_info, 'name') else str(col_info)
+                collection = client_db.get_collection(col_name, embedding_function=ef)
 
-                if results and results.get("documents"):
-                    docs = results["documents"][0]
-                    metas = results["metadatas"][0] if results.get("metadatas") else [{}] * len(docs)
-                    distances = results["distances"][0] if results.get("distances") else [0] * len(docs)
+                # Build where filter
+                where_filter = {}
+                if branch:
+                    where_filter["branch"] = branch
+                if filter_type:
+                    where_filter["file_type"] = filter_type
 
-                    for doc, meta, dist in zip(docs, metas, distances):
-                        relevance = max(0, 1.0 - dist) * 100
-                        fp = meta.get("file_path", "")
-                        rp = meta.get("repo", "")
-                        br = meta.get("branch", "default")
-                        all_results.append({
-                            "text": doc,
-                            "file_path": fp,
-                            "repo": rp,
-                            "branch": br,
-                            "relevance_pct": round(relevance, 1),
-                            "chunk_index": meta.get("chunk_index", 0),
-                            "file_type": meta.get("file_type", "unknown"),
-                            "source_citation": f"[Source: {fp} | repo: {rp} | branch: {br} | relevance: {round(relevance, 1)}%]",
-                        })
-            except Exception:
-                continue
+                try:
+                    results = collection.query(
+                        query_embeddings=[query_embedding],
+                        n_results=top_k,
+                        where=where_filter if where_filter else None,
+                    )
 
-        # Sort by relevance and return top_k
-        all_results.sort(key=lambda r: r["relevance_pct"], reverse=True)
-        return all_results[:top_k]
+                    if results and results.get("documents"):
+                        docs = results["documents"][0]
+                        metas = results["metadatas"][0] if results.get("metadatas") else [{}] * len(docs)
+                        distances = results["distances"][0] if results.get("distances") else [0] * len(docs)
 
-    except ImportError:
+                        for doc, meta, dist in zip(docs, metas, distances):
+                            relevance = max(0, 1.0 - dist) * 100
+                            fp = meta.get("file_path", "")
+                            rp = meta.get("repo", "")
+                            br = meta.get("branch", "default")
+                            all_results.append({
+                                "text": doc,
+                                "file_path": fp,
+                                "repo": rp,
+                                "branch": br,
+                                "relevance_pct": round(relevance, 1),
+                                "chunk_index": meta.get("chunk_index", 0),
+                                "file_type": meta.get("file_type", "unknown"),
+                                "source_citation": f"[Source: {fp} | repo: {rp} | branch: {br} | relevance: {round(relevance, 1)}%]",
+                            })
+                except Exception:
+                    continue
+
+            # Sort by relevance and return top_k
+            all_results.sort(key=lambda r: r["relevance_pct"], reverse=True)
+            return all_results[:top_k]
+
+    except (ImportError, Exception):
         pass
 
     # ------------------------------------------------------------------
-    # Fallback: JSON-based search  (optimised)
+    # Fallback: BM25 search over JSON chunks
     # ------------------------------------------------------------------
-    vectors_dir = mem_dir / "vectors"
-    if not vectors_dir.exists():
+    bm25, all_chunks = _get_bm25_index(mem_dir / "vectors")
+    if bm25 is None:
         return []
 
-    # 1. Enumerate vector JSON files and pre-filter by branch
-    json_files = list(vectors_dir.glob("*.json"))
-    json_files = _filter_vector_files_by_branch(json_files, branch)
+    query_tokens = _tokenize_bm25(query)
+    scores = bm25.get_scores(query_tokens)
 
-    all_chunks: list[dict] = []
-    for json_file in json_files:
-        try:
-            with open(json_file, 'r', encoding='utf-8') as f:
-                chunks = json.load(f)
-                if isinstance(chunks, list):
-                    all_chunks.extend(chunks)
-        except (json.JSONDecodeError, OSError):
+    # Build scored results with branch/type filtering
+    scored: list[tuple] = []
+    for i in range(len(all_chunks)):
+        if scores[i] <= 0:
             continue
+        meta = all_chunks[i].get("metadata", {})
+        if branch and meta.get("branch") != branch:
+            continue
+        if filter_type and meta.get("file_type") != filter_type:
+            continue
+        scored.append((scores[i], i))
 
-    # 2. Apply metadata filters
-    if branch:
-        all_chunks = [c for c in all_chunks if c.get("metadata", {}).get("branch") == branch]
-    if filter_type:
-        all_chunks = [c for c in all_chunks if c.get("metadata", {}).get("file_type") == filter_type]
+    if not scored:
+        return []
 
-    # 3. Score and rank — with early exit and hard timeout
-    scored: list[dict] = []
-    high_quality_count = 0
-    start_time = time.monotonic()
-    timed_out = False
+    scored.sort(key=lambda x: x[0], reverse=True)
+    scored = scored[:top_k]
 
-    for chunk in all_chunks:
-        # Hard timeout check (Windows-compatible, no signal)
-        elapsed = time.monotonic() - start_time
-        if elapsed >= JSON_SCORING_TIMEOUT_SECS:
-            timed_out = True
-            break
-
-        text = chunk.get("text", "")
+    max_score = scored[0][0]
+    results = []
+    for score, idx in scored:
+        chunk = all_chunks[idx]
         meta = chunk.get("metadata", {})
-        file_path = meta.get("file_path", "")
-        score = _simple_relevance(query, text, file_path)
-        if score > 0:
-            fp = meta.get("file_path", "")
-            rp = meta.get("repo", "")
-            br = meta.get("branch", "default")
-            rel_pct = round(score * 100, 1)
-            scored.append({
-                "text": text,
-                "file_path": fp,
-                "repo": rp,
-                "branch": br,
-                "relevance_pct": rel_pct,
-                "chunk_index": meta.get("chunk_index", 0),
-                "file_type": meta.get("file_type", "unknown"),
-                "source_citation": f"[Source: {fp} | repo: {rp} | branch: {br} | relevance: {rel_pct}%]",
-            })
-            if score >= HIGH_RELEVANCE_THRESHOLD:
-                high_quality_count += 1
-
-        # Early exit: enough high-quality results — no need to score all chunks
-        if high_quality_count >= top_k * 2:
-            break
-
-    scored.sort(key=lambda r: r["relevance_pct"], reverse=True)
-    results = scored[:top_k]
-
-    # Attach a warning if the search was cut short by timeout
-    if timed_out and results:
-        results[0]["_warning"] = (
-            f"JSON scoring timed out after {JSON_SCORING_TIMEOUT_SECS}s. "
-            "Results may be incomplete. Use a narrower branch or query."
-        )
+        fp = meta.get("file_path", "")
+        rp = meta.get("repo", "")
+        br = meta.get("branch", "default")
+        rel_pct = round((score / max_score) * 100, 1) if max_score > 0 else 0
+        results.append({
+            "text": chunk.get("text", ""),
+            "file_path": fp,
+            "repo": rp,
+            "branch": br,
+            "relevance_pct": rel_pct,
+            "chunk_index": meta.get("chunk_index", 0),
+            "file_type": meta.get("file_type", "unknown"),
+            "source_citation": f"[Source: {fp} | repo: {rp} | branch: {br} | relevance: {rel_pct}%]",
+        })
 
     return results
 

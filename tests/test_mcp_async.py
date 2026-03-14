@@ -39,6 +39,8 @@ from hivemind_mcp.hivemind_server import (
     hivemind_list_branches,
     hivemind_query_graph,
     hivemind_query_memory,
+    hivemind_recall_investigation,
+    hivemind_save_investigation,
     hivemind_search_files,
     hivemind_set_client,
     hivemind_write_file,
@@ -68,6 +70,8 @@ class TestToolsAreAsync(unittest.TestCase):
         hivemind_write_file,
         hivemind_get_active_client,
         hivemind_get_active_branch,
+        hivemind_save_investigation,
+        hivemind_recall_investigation,
     ]
 
     def test_all_tools_are_coroutines(self):
@@ -77,11 +81,11 @@ class TestToolsAreAsync(unittest.TestCase):
                 f"{fn.__name__} is not async",
             )
 
-    def test_tool_count_is_14(self):
-        self.assertEqual(len(self.TOOL_FUNCTIONS), 14)
+    def test_tool_count_is_16(self):
+        self.assertEqual(len(self.TOOL_FUNCTIONS), 16)
 
-    def test_registry_has_14_tools(self):
-        self.assertEqual(len(TOOL_REGISTRY), 14)
+    def test_registry_has_16_tools(self):
+        self.assertEqual(len(TOOL_REGISTRY), 16)
 
     def test_registry_values_are_callable(self):
         for name, fn in TOOL_REGISTRY.items():

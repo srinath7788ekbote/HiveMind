@@ -41,10 +41,10 @@ class TestMCPServerImports(unittest.TestCase):
         self.assertIsNotNone(mcp_server)
         self.assertEqual(mcp_server.name, "hivemind")
 
-    def test_tool_registry_has_14_tools(self):
-        """TOOL_REGISTRY contains exactly 14 tools."""
+    def test_tool_registry_has_16_tools(self):
+        """TOOL_REGISTRY contains exactly 16 tools."""
         from hivemind_mcp.hivemind_server import TOOL_REGISTRY
-        self.assertEqual(len(TOOL_REGISTRY), 14)
+        self.assertEqual(len(TOOL_REGISTRY), 16)
 
     def test_tool_registry_all_callable(self):
         """Every entry in TOOL_REGISTRY is callable."""
@@ -53,7 +53,7 @@ class TestMCPServerImports(unittest.TestCase):
             self.assertTrue(callable(fn), f"{name} is not callable")
 
     def test_all_expected_tools_registered(self):
-        """All 14 expected tool names are present in TOOL_REGISTRY."""
+        """All 16 expected tool names are present in TOOL_REGISTRY."""
         from hivemind_mcp.hivemind_server import TOOL_REGISTRY
         expected = [
             "hivemind_query_memory",
@@ -70,6 +70,8 @@ class TestMCPServerImports(unittest.TestCase):
             "hivemind_get_active_client",
             "hivemind_get_active_branch",
             "hivemind_check_branch",
+            "hivemind_save_investigation",
+            "hivemind_recall_investigation",
         ]
         for name in expected:
             self.assertIn(name, TOOL_REGISTRY, f"Missing tool: {name}")
@@ -130,7 +132,7 @@ class TestMCPSelfTest(unittest.TestCase):
             cwd=str(PROJECT_ROOT),
             timeout=30,
         )
-        self.assertIn("14/14", result.stdout)
+        self.assertIn("16/16", result.stdout)
 
 
 class TestGetActiveClientTool(unittest.TestCase):
