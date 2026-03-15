@@ -6,11 +6,15 @@ description: >
   Always includes verify steps, rollback steps, and approval gate callouts.
   Triggers: how do I, steps, runbook, procedure, create new, set up,
   guide, walkthrough, plan, migrate.
-tools: ['query-memory', 'query-graph', 'get-pipeline', 'search-files', 'list-branches']
+tools:
+  - read
+  - search
+  - editFiles
+user-invocable: true
 handoffs:
-  - label: "-> DevOps (pipeline steps needed)"
+  - label: "Start Implementation"
     agent: hivemind-devops
-    prompt: "Planner needs pipeline detail for runbook. Context: {{paste your findings here}}. Get steps for: "
+    prompt: "Implement the plan outlined above."
     send: false
   - label: "-> Architect (infra layer order needed)"
     agent: hivemind-architect

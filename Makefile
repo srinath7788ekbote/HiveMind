@@ -26,6 +26,10 @@ help:
 	@echo    make test               Run test suite
 	@echo    make server             Start MCP server
 	@echo    make add-client         Add new client (interactive)
+	@echo    make docs               Open the usage guide
+	@echo    make verify             Run tests + KB status + ChromaDB check
+	@echo    make recall             Search past investigations
+	@echo    make save-investigation Show how to save investigations
 	@echo.
 	@echo  Quick start for new users:
 	@echo    1. make setup
@@ -90,4 +94,38 @@ server:
 add-client:
 	@.venv\Scripts\python scripts\add_client.py
 
-.PHONY: help setup crawl-all crawl sync chromadb status test server add-client
+# ── docs ─────────────────────────────────────────────────
+docs:
+	@code \USAGE_GUIDE.md
+
+# ── verify ───────────────────────────────────────────────
+verify:
+	@.venv\Scripts\python -m pytest tests\ -q
+	@.venv\Scripts\python scripts\sync_kb.py --status
+	@.venv\Scripts\python scripts\populate_chromadb.py --verify
+
+# ── recall ───────────────────────────────────────────────
+QUERY ?=
+recall:
+ifndef CLIENT
+	@echo ERROR: CLIENT is required. Usage: make recall CLIENT=dfin QUERY="tagging-service"
+	@exit /b 1
+else
+ifndef QUERY
+	@echo ERROR: QUERY is required. Usage: make recall CLIENT=dfin QUERY="tagging-service"
+	@exit /b 1
+else
+	@.venv\Scripts\python tools\recall_investigation.py --client $(CLIENT) --query "$(QUERY)"
+endif
+endif
+
+# ── save-investigation ───────────────────────────────────
+save-investigation:
+	@echo.
+	@echo  To save an investigation, use Copilot Chat or Claude Agent:
+	@echo.
+	@echo    "Save this investigation"
+	@echo    OR: @hivemind-team-lead save this investigation
+	@echo.
+
+.PHONY: help setup crawl-all crawl sync chromadb status test server add-client docs verify recall save-investigation

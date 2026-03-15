@@ -5,23 +5,34 @@ description: >
   Routes to specialist agents, decomposes complex questions,
   synthesizes findings. Use me first for any infrastructure,
   pipeline, incident, or architecture question.
-tools: ['query-memory', 'query-graph', 'get-entity', 'search-files', 'list-branches']
+tools:
+  - agent
+  - read
+  - search
+agents:
+  - hivemind-investigator
+  - hivemind-devops
+  - hivemind-architect
+  - hivemind-security
+  - hivemind-analyst
+  - hivemind-planner
+user-invocable: true
 handoffs:
+  - label: "Run Investigation"
+    agent: hivemind-investigator
+    prompt: "Investigate the issue described above using KB and Sherlock."
+    send: false
+  - label: "Check Infrastructure"
+    agent: hivemind-architect
+    prompt: "Analyze the infrastructure involved in this issue."
+    send: false
   - label: "-> DevOps Agent (pipeline/deploy/helm issues)"
     agent: hivemind-devops
     prompt: "Continue investigation from a CI/CD angle. Context so far: "
     send: false
-  - label: "-> Architect Agent (terraform/infra issues)"
-    agent: hivemind-architect
-    prompt: "Continue investigation from an infrastructure angle. Context so far: "
-    send: false
   - label: "-> Security Agent (secret/RBAC/identity issues)"
     agent: hivemind-security
     prompt: "Continue investigation from a security angle. Context so far: "
-    send: false
-  - label: "-> Investigator Agent (root cause analysis)"
-    agent: hivemind-investigator
-    prompt: "Find the root cause. Context so far: "
     send: false
   - label: "-> Analyst Agent (impact analysis)"
     agent: hivemind-analyst

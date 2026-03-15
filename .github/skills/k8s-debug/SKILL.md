@@ -51,6 +51,25 @@ triggers:
   - node pool
   - managed identity
   - workload identity
+  - PodDisruptionBudget
+  - pdb
+  - DaemonSet
+  - webhook
+  - admission
+  - istio
+  - sidecar injection
+  - mTLS
+  - PeerAuthentication
+  - DestinationRule
+  - istiod
+  - envoy
+  - istio-proxy
+  - disruption budget
+  - eviction blocked
+  - cannot evict
+  - newrelic agent
+  - csi-driver
+  - admission webhook denied
 slash_command: /k8s
 ---
 
@@ -108,6 +127,9 @@ The investigation MUST continue regardless of Sherlock availability. Two paths e
 | Layer 4 — Node | `mcp_sherlock_run_nrql_query` (K8sNodeSample) | `kubectl top nodes`, `kubectl describe node <node>` |
 | Layer 5 — Networking | `mcp_sherlock_get_service_dependencies`, `mcp_sherlock_search_logs` | `kubectl exec <pod> -n <ns> -- curl -sv <target>` |
 | Layer 6 — Storage | `mcp_sherlock_get_k8s_health` | `kubectl describe pvc <name> -n <ns>`, `kubectl get events -n <ns>` |
+| Layer 7 — PDB | `mcp_sherlock_get_service_golden_signals`, `mcp_sherlock_get_deployments` | `kubectl get pdb -n <ns>`, `kubectl describe pdb <name> -n <ns>` |
+| Layer 8 — DaemonSet | `mcp_sherlock_run_nrql_query` (K8sNodeSample, K8sDaemonsetSample) | `kubectl get daemonset -n <ns> -o wide`, `kubectl describe node <node>` |
+| Layer 9 — Admission Webhook | `mcp_sherlock_search_logs`, `mcp_sherlock_get_service_golden_signals` | `kubectl get events -n <ns> \| grep webhook`, `kubectl get mutatingwebhookconfigurations` |
 | Metrics | `mcp_sherlock_get_service_golden_signals`, `mcp_sherlock_get_app_metrics` | `kubectl get --raw /apis/metrics.k8s.io/v1beta1/namespaces/<ns>/pods` |
 
 ---
@@ -194,6 +216,42 @@ POD STATUS
 ├── Error (generic)
 │   ├── Init container failure → LAYER 2 (Container, section 2.5)
 │   └── Entrypoint or command missing → LAYER 2 (Container)
+│
+├── Deployment not progressing / Rollout stuck
+│   ├── "Cannot evict pod as it would violate the pod's disruption budget"
+│   │   → LAYER 7 (PDB) → First cmd: kubectl get pdb -n <ns>
+│   │   └── Check: ALLOWED DISRUPTIONS = 0, minAvailable vs replica count
+│   ├── HPA scale-down blocked
+│   │   → LAYER 7 (PDB) → First cmd: kubectl describe pdb <pdb-name> -n <ns>
+│   │   └── Check: HPA minReplicas = PDB minAvailable (zero disruption room)
+│   └── Node drain not progressing
+│       → LAYER 7 (PDB) → First cmd: kubectl get pdb -n <ns>
+│       └── Check: PDB preventing eviction during node pool upgrade
+│
+├── DaemonSet pods missing from nodes
+│   ├── New Relic agent not reporting from node
+│   │   → LAYER 8 (DaemonSet) → First cmd: kubectl get pods -n newrelic -o wide
+│   │   └── Check: DESIRED vs READY mismatch, pod missing from specific node
+│   ├── KeyVault CSI driver missing from node
+│   │   → LAYER 8 (DaemonSet) → First cmd: kubectl get pods -n kube-system -l app=secrets-store-csi-driver -o wide
+│   │   └── Check: CSI pod not on node → all secret mounts on that node fail
+│   └── No metrics from node in New Relic
+│       → LAYER 8 (DaemonSet) → First cmd: kubectl get daemonset -n newrelic -o wide
+│       └── Check: node taints, nodeSelector mismatch, resource pressure
+│
+├── Pod never created / admission denied
+│   ├── "admission webhook denied the request"
+│   │   → LAYER 9 (Admission Webhook) → First cmd: kubectl get events -n <ns> --sort-by='.lastTimestamp' | grep -i webhook
+│   │   └── Check: which webhook denied, webhook service health
+│   ├── Istio sidecar not injected (or injected unexpectedly)
+│   │   → LAYER 9 (Admission Webhook) → First cmd: kubectl get namespace <ns> --show-labels | grep istio-injection
+│   │   └── Check: namespace label, pod annotation sidecar.istio.io/inject
+│   ├── 503 between services / mTLS failure
+│   │   → LAYER 9 (Admission Webhook) → First cmd: kubectl get peerauthentication -n <ns>
+│   │   └── Check: STRICT mode + service missing sidecar = connection refused
+│   └── Azure Policy blocking resource creation
+│       → LAYER 9 (Admission Webhook) → First cmd: kubectl get constraints
+│       └── Check: Gatekeeper/Azure Policy violations
 │
 └── Unknown status
     → First cmd: kubectl describe pod <pod> -n <ns>
@@ -825,6 +883,463 @@ kubectl get events -n <namespace> --field-selector reason=FailedMount --sort-by=
 
 ---
 
+## LAYER 7 — POD DISRUPTION BUDGET (PDB) INVESTIGATION
+
+### When to Use
+
+- Rolling update stuck / deployment not progressing
+- Pods not being evicted during node drain
+- HPA scale-down blocked
+- `"Cannot evict pod as it would violate the pod's disruption budget"` error
+- Node pool upgrade not progressing
+
+### Commands to Recommend (in order)
+
+**1. Check PDB status in namespace**
+```bash
+kubectl get pdb -n <namespace>
+```
+> **Look for:** ALLOWED DISRUPTIONS column. If `0` → no pod can be evicted — deployment, drain, or scale-down is stuck. MIN AVAILABLE vs DESIRED shows headroom.
+
+**2. Describe the PDB**
+```bash
+kubectl describe pdb <pdb-name> -n <namespace>
+```
+> **Look for:**
+> - `ALLOWED DISRUPTIONS = 0` → cannot evict any pod (deployment stuck)
+> - `MIN AVAILABLE` vs actual `READY` pods — if desired replicas = minAvailable, any disruption violates the PDB
+> - `MAX UNAVAILABLE` — if set to 0, no disruption allowed
+> - `CURRENT HEALTHY` — if lower than expected, pods are unhealthy AND PDB prevents eviction (deadlock)
+
+**3. Check deployment replica count vs PDB config**
+```bash
+kubectl get deployment <service> -n <namespace> -o jsonpath='{.spec.replicas}'
+```
+> **Look for:** If replicas = PDB minAvailable → zero disruptions allowed. Must have replicas > minAvailable for any rolling update to proceed.
+
+**4. Check if pods are actually healthy**
+```bash
+kubectl get pods -n <namespace> -l <label-selector> -o wide
+```
+> **Look for:** Pods in non-Ready state. PDB counts healthy pods — if pods are unhealthy AND PDB prevents eviction of the remaining healthy ones, you get a deadlock.
+
+**5. Check HPA configuration (if autoscaling)**
+```bash
+kubectl get hpa -n <namespace>
+kubectl describe hpa <hpa-name> -n <namespace>
+```
+> **Look for:** HPA `minReplicas` = PDB `minAvailable` → HPA can never scale down because removing any pod violates PDB.
+
+**6. Check if node drain is blocked**
+```bash
+kubectl get events --all-namespaces --sort-by='.lastTimestamp' | grep -i "evict\|disrupt\|pdb\|drain"
+```
+> **Look for:** `"Cannot evict pod"` events pointing to specific PDB names. Multiple PDBs across different namespaces can all block a single node drain.
+
+### PDB Issue Diagnosis Matrix
+
+| Symptom | Cause | Verification | Fix |
+|---------|-------|-------------|-----|
+| `ALLOWED DISRUPTIONS = 0`, replicas = minAvailable | No headroom for disruption | Compare `kubectl get deployment` replicas with PDB minAvailable | Temporarily increase replicas OR adjust PDB minAvailable |
+| Rollout stuck, new RS not progressing | PDB preventing old pod eviction during rolling update | `kubectl get rs -n <ns> -l app=<svc>` — old RS still has all pods | Increase replicas to give PDB room |
+| Node drain hanging | PDB on one or more pods blocking eviction | `kubectl drain <node> --dry-run` — shows which pods can't be evicted | Increase replicas, or temporarily delete PDB (with user approval) |
+| HPA won't scale down below N | HPA minReplicas = PDB minAvailable | Compare HPA and PDB configs | Set HPA minReplicas > PDB minAvailable |
+| Single-replica service with PDB | minAvailable: 1 on a 1-replica deployment | `kubectl get pdb` shows ALLOWED DISRUPTIONS = 0 | Remove PDB (single replica can't tolerate disruption) or add replicas |
+
+### KB Cross-Reference (Layer 7)
+
+```
+STEP 1: hivemind_query_memory(client=<client>, query="<service> PodDisruptionBudget pdb minAvailable maxUnavailable")
+        → Find PDB definition in Helm values or templates
+STEP 2: hivemind_query_memory(client=<client>, query="<service> replicas autoscaling HPA minReplicas")
+        → Find replica count and HPA config
+STEP 3: hivemind_impact_analysis(client=<client>, entity="<service>")
+        → Check if blocked rollout is cascading to dependents
+```
+
+### Sherlock Correlation (Layer 7)
+
+**Path A (Sherlock available):**
+
+| Data Needed | Sherlock Tool |
+|-------------|---------------|
+| Error rate spike at rollout start | `mcp_sherlock_get_service_golden_signals(service_name="<service>")` |
+| Deployment timing | `mcp_sherlock_get_deployments(app_name="<service>")` |
+| Replica count over time | `mcp_sherlock_run_nrql_query(nrql="SELECT latest(replicasDesired), latest(replicasReady) FROM K8sDeploymentSample WHERE deploymentName='<service>' SINCE 1 hour ago TIMESERIES")` |
+
+**Path B (Sherlock unavailable) — fallback commands:**
+```bash
+# Check PDB status
+kubectl get pdb -n <namespace>
+
+# Check deployment replicas vs ready
+kubectl get deployment <service> -n <namespace>
+
+# Check recent rollout events
+kubectl rollout status deployment/<service> -n <namespace>
+```
+State: `"⚠️ Sherlock unavailable — proceeding with command-based investigation"`
+
+### Common PDB Issues on AKS
+
+| Scenario | Root Cause | Fix |
+|----------|-----------|-----|
+| Deployment scaled down but PDB not updated | PDB minAvailable still set for old replica count | Update PDB in Helm values to match new replica count |
+| Node pool upgrade stuck | Node drains blocked by PDB across multiple namespaces | Temporarily increase replicas, or coordinate PDB adjustments before upgrades |
+| HPA minimum = PDB minAvailable | No room for disruption at minimum scale | Set HPA minReplicas to PDB minAvailable + 1 |
+| Single-replica service with minAvailable: 1 | Zero disruptions ever allowed | Add replicas or remove PDB for single-replica services |
+| PDB + `maxUnavailable: 0` in deployment strategy | Neither deployment strategy nor PDB allows any disruption | Set `maxUnavailable: 1` in deployment strategy OR adjust PDB |
+
+### Remediation Options (recommend to user — never auto-apply)
+
+1. **Temporarily increase replicas** to give PDB room: `kubectl scale deployment/<service> -n <namespace> --replicas=<current+1>`
+2. **Adjust PDB minAvailable** to allow one disruption: modify `minAvailable` value in Helm values
+3. **If urgent node drain** (with user explicit approval — destructive): `kubectl delete pdb <pdb-name> -n <namespace>` — recreates automatically on next Helm deploy
+4. **Long-term fix**: ensure `replicas > PDB minAvailable` in Helm values, and HPA minReplicas > PDB minAvailable
+
+---
+
+## LAYER 8 — DAEMONSET INVESTIGATION
+
+### When to Use
+
+- New Relic agent not reporting from a specific node
+- KeyVault CSI driver failing on specific nodes
+- DaemonSet pod not scheduled on all nodes
+- Node-level issue where only some pods are affected
+- Istio CNI plugin not present on a node (after nginx→Istio migration)
+
+### DaemonSets on This Platform
+
+| DaemonSet | Namespace | Purpose | Impact If Missing |
+|-----------|-----------|---------|-------------------|
+| New Relic infrastructure agent | `newrelic` (or operator namespace) | Node and pod observability | No metrics/logs from affected node in New Relic |
+| KeyVault CSI driver | `kube-system` | Secret volume mounts from Azure KeyVault | ALL secret mounts on that node fail → pods stuck in ContainerCreating |
+| Istio CNI (if enabled) | `istio-system` | Network setup for Istio sidecar | Pods on that node can't join the mesh |
+
+### Commands to Recommend (in order)
+
+**1. Check DaemonSet status**
+```bash
+kubectl get daemonset -n <namespace> -o wide
+```
+> **Look for:** DESIRED vs CURRENT vs READY vs AVAILABLE. Any mismatch = DaemonSet pod missing from one or more nodes. NUMBER AVAILABLE < DESIRED is the key signal.
+
+**2. Identify which nodes are missing the DaemonSet pod**
+```bash
+kubectl get pods -n <namespace> -l <daemonset-selector> -o wide
+```
+> **Look for:** Cross-reference NODE column with full node list. Any node not in this output = DaemonSet not scheduled there.
+
+**3. Get full node list for comparison**
+```bash
+kubectl get nodes -o wide
+```
+> **Look for:** Compare with pod list from step 2. Identify the specific node(s) missing a DaemonSet pod.
+
+**4. Check why DaemonSet won't schedule on the node**
+```bash
+kubectl describe daemonset <daemonset-name> -n <namespace>
+```
+> **Look for:** Events showing scheduling failures. Node Selector, Tolerations in the DaemonSet spec. `FailedCreate` events with reason.
+
+**5. Check node taints (most common cause)**
+```bash
+kubectl describe node <missing-node> | grep -A 10 Taints
+```
+> **Look for:** Taints that the DaemonSet doesn't tolerate. Common: spot instance taint, Windows node taint, custom maintenance taint.
+
+**6. Check node resource pressure**
+```bash
+kubectl describe node <missing-node> | grep -A 10 Conditions
+kubectl top node <missing-node>
+```
+> **Look for:** MemoryPressure, DiskPressure = node may be rejecting new pods including DaemonSet pods.
+
+### New Relic Agent Investigation
+
+```bash
+# 1. Check NR DaemonSet pods
+kubectl get pods -n newrelic -o wide
+
+# 2. Get logs from NR agent on affected node (if pod exists but unhealthy)
+kubectl logs <nr-pod> -n newrelic --tail=50
+
+# 3. Check NR agent configuration
+kubectl describe daemonset newrelic-infrastructure -n newrelic
+
+# 4. Verify license key secret exists
+kubectl get secret newrelic-license -n newrelic
+
+# 5. Check if NR pod is crashlooping
+kubectl get pods -n newrelic -o wide | grep <node-name>
+```
+> **Look for:** License key secret missing/invalid, cluster name config wrong, node network access blocked (NR needs outbound HTTPS), agent version incompatibility after cluster upgrade.
+
+### KeyVault CSI Driver Investigation
+
+```bash
+# 1. Check CSI driver DaemonSet
+kubectl get pods -n kube-system -l app=secrets-store-csi-driver -o wide
+
+# 2. Get CSI driver logs on the affected node
+kubectl logs <csi-pod-on-affected-node> -n kube-system --tail=50
+
+# 3. Check CSI driver DaemonSet config
+kubectl describe daemonset csi-secrets-store -n kube-system
+
+# 4. Check if CSI node driver registrar is healthy
+kubectl get pods -n kube-system -l app=csi-secrets-store-provider-azure -o wide
+```
+> **Critical:** If CSI driver pod is missing from a node → ALL pods on that node that mount KeyVault secrets will be stuck in `ContainerCreating`. This is a high-blast-radius failure.
+
+### Why DaemonSet Won't Schedule — Diagnosis Matrix
+
+| Reason | How to Confirm | Fix |
+|--------|---------------|-----|
+| Node taint not tolerated | `kubectl describe node <node> \| grep Taints` vs `kubectl get ds <ds> -n <ns> -o jsonpath='{.spec.template.spec.tolerations}'` | Add toleration to DaemonSet spec in Helm values |
+| NodeSelector mismatch | `kubectl get ds <ds> -n <ns> -o jsonpath='{.spec.template.spec.nodeSelector}'` vs `kubectl get node <node> --show-labels` | Update nodeSelector or add label to node |
+| Resource pressure on node | `kubectl describe node <node>` — Conditions section | Resolve node pressure first (evict low-priority pods, scale node pool) |
+| Node NotReady | `kubectl get nodes` — STATUS column | Fix node health issue → DaemonSet auto-schedules when Ready |
+| Windows node pool | `kubectl get node <node> -o jsonpath='{.metadata.labels.kubernetes\.io/os}'` | DaemonSets with Linux-only selectors won't schedule — add `nodeSelector: kubernetes.io/os: linux` |
+
+### KB Cross-Reference (Layer 8)
+
+```
+STEP 1: hivemind_query_memory(client=<client>, query="daemonset newrelic agent tolerations nodeSelector")
+        → Find DaemonSet config in Helm values or KB
+STEP 2: hivemind_query_memory(client=<client>, query="csi-driver secrets-store keyvault daemonset")
+        → Find CSI driver configuration
+STEP 3: hivemind_query_memory(client=<client>, query="node pool taints tolerations affinity")
+        → Find node pool and scheduling config in Terraform
+```
+
+### Sherlock Correlation (Layer 8)
+
+**Path A (Sherlock available):**
+
+| Data Needed | Sherlock Tool |
+|-------------|---------------|
+| Is affected node reporting infra metrics? | `mcp_sherlock_run_nrql_query(nrql="SELECT latest(cpuPercent) FROM SystemSample WHERE hostname LIKE '<node-name>%' SINCE 30 minutes ago")` |
+| Are pods on that node missing from APM? | `mcp_sherlock_run_nrql_query(nrql="SELECT count(*) FROM Transaction WHERE host LIKE '<node-name>%' SINCE 30 minutes ago FACET appName")` |
+| DaemonSet pod restart history | `mcp_sherlock_run_nrql_query(nrql="SELECT latest(restartCount) FROM K8sContainerSample WHERE daemonsetName='<ds-name>' FACET nodeName SINCE 1 hour ago")` |
+| Node-level alerts | `mcp_sherlock_get_incidents(state="open")` |
+
+**Path B (Sherlock unavailable) — fallback commands:**
+```bash
+# Check DaemonSet status across all nodes
+kubectl get daemonset -n <namespace> -o wide
+
+# Check specific node health
+kubectl describe node <node-name>
+
+# Get recent events for the DaemonSet
+kubectl get events -n <namespace> --field-selector involvedObject.kind=DaemonSet --sort-by='.lastTimestamp'
+```
+State: `"⚠️ Sherlock unavailable — proceeding with command-based investigation"`
+
+### Common DaemonSet Gotchas on AKS
+
+| Scenario | Root Cause | Fix |
+|----------|-----------|-----|
+| Node pool upgrade creates new nodes | New nodes may have different taints → DaemonSet toleration doesn't match | Update DaemonSet tolerations to cover all node pool taints |
+| Spot node eviction + replacement | New spot node may not get DaemonSet immediately (scheduling delay) | Normal behavior — wait 30s. If persistent, check resource pressure |
+| Windows node pools | DaemonSets with Linux-only images won't schedule on Windows nodes | Add `nodeSelector: kubernetes.io/os: linux` to DaemonSet spec |
+| Node cordoned for maintenance | DaemonSet pods are not evicted by cordon, but won't schedule on NEW cordoned nodes | Expected behavior during maintenance |
+| Azure CNI node reboot | DaemonSet pods restart, brief gap in coverage | Monitor with NR alert on DaemonSet READY < DESIRED |
+
+---
+
+## LAYER 9 — ADMISSION WEBHOOK INVESTIGATION
+
+### When to Use
+
+- Pod creation silently fails (no error in deployment, pod never appears)
+- `"admission webhook denied the request"` error in events
+- Mutation webhook changing pod spec unexpectedly
+- Istio sidecar injection not happening (or happening when it shouldn't)
+- Azure Policy blocking resource creation
+- 503 errors between services after Istio migration
+- mTLS handshake failures
+
+### Commands to Recommend (in order)
+
+**1. Check for admission webhook errors in events**
+```bash
+kubectl get events -n <namespace> --sort-by='.lastTimestamp' | grep -i "webhook\|admission\|denied\|mutating\|validating"
+```
+> **Look for:** `"admission webhook denied the request"` messages. The event will name the webhook that denied the request. `Warning` events with webhook references indicate policy violations.
+
+**2. List all webhooks in cluster**
+```bash
+kubectl get validatingwebhookconfigurations
+kubectl get mutatingwebhookconfigurations
+```
+> **Look for:** Istio sidecar injector (mutating), Azure Policy (validating + mutating), Gatekeeper (validating), any custom webhooks. Note the failurePolicy (`Fail` vs `Ignore`) — `Fail` means webhook outage = ALL pod creation fails.
+
+**3. Check if webhook service is healthy**
+```bash
+kubectl describe validatingwebhookconfiguration <webhook-name>
+```
+> **Look for:** `service` reference → check if that service and its backing pods are running. If webhook pod is down AND failurePolicy=Fail → ALL matching resource creation is blocked.
+
+**4. Check webhook backing service health**
+```bash
+kubectl get pods -n <webhook-namespace> -l <webhook-label>
+kubectl get svc -n <webhook-namespace> <webhook-service>
+kubectl get endpoints -n <webhook-namespace> <webhook-service>
+```
+> **Look for:** Webhook pods not Running, endpoints empty (= webhook can't serve requests), service selector mismatch.
+
+### Istio-Specific Investigation (Critical — Platform Migrated to Istio)
+
+#### Sidecar Injection Not Happening
+
+```bash
+# 1. Check namespace label for auto-injection
+kubectl get namespace <namespace> --show-labels | grep istio-injection
+# Must show: istio-injection=enabled
+
+# 2. Check if specific pod opted out
+kubectl get pod <pod> -n <namespace> -o jsonpath='{.metadata.annotations.sidecar\.istio\.io/inject}'
+# If "false" → sidecar explicitly disabled for this pod
+
+# 3. Check istiod (injection webhook) health
+kubectl get pods -n istio-system -l app=istiod
+kubectl logs -n istio-system -l app=istiod --tail=50
+```
+
+#### Sidecar Injected Unexpectedly
+
+```bash
+# 1. List containers in the pod — look for istio-proxy
+kubectl get pod <pod> -n <namespace> -o jsonpath='{.spec.containers[*].name}'
+# If "istio-proxy" appears → sidecar is injected
+
+# 2. Check namespace label
+kubectl get namespace <namespace> --show-labels
+# If istio-injection=enabled but this pod shouldn't have sidecar:
+# Add annotation to pod: sidecar.istio.io/inject: "false"
+```
+
+#### mTLS Policy Issues (Common After nginx→Istio Migration)
+
+```bash
+# 1. Check PeerAuthentication policy
+kubectl get peerauthentication -n <namespace>
+kubectl get peerauthentication -n istio-system
+# Mesh-wide policy in istio-system, namespace override in specific namespace
+
+# 2. Check DestinationRule
+kubectl get destinationrule -n <namespace>
+
+# 3. If PeerAuthentication mode=STRICT and service has no sidecar → connection refused
+kubectl get peerauthentication <name> -n <namespace> -o jsonpath='{.spec.mtls.mode}'
+# STRICT → all traffic must be mTLS. Non-mesh services can't connect.
+# PERMISSIVE → accepts both plaintext and mTLS. Use during migration.
+
+# 4. Check which services have sidecars
+kubectl get pods -n <namespace> -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[*].name}{"\n"}{end}'
+# Look for pods WITHOUT istio-proxy container — they can't do mTLS
+```
+
+#### Istio Proxy Debugging
+
+```bash
+# 1. Check proxy status across the mesh
+istioctl proxy-status
+
+# 2. Analyze namespace for issues
+istioctl analyze -n <namespace>
+
+# 3. Check proxy config for a specific pod
+istioctl proxy-config cluster <pod> -n <namespace>
+
+# 4. Check Envoy proxy logs
+kubectl logs <pod> -n <namespace> -c istio-proxy --tail=100
+```
+
+### Azure Policy / Gatekeeper Investigation
+
+```bash
+# 1. Check Gatekeeper constraints (Azure Policy for AKS)
+kubectl get constraints
+
+# 2. Describe a constraint to see violations
+kubectl describe constraint <constraint-name>
+
+# 3. Check constraint templates
+kubectl get constrainttemplate
+
+# 4. Check Azure Policy pod health
+kubectl get pods -n gatekeeper-system
+
+# 5. Get audit results (which resources violated policies)
+kubectl get constraint -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.totalViolations}{"\n"}{end}'
+```
+> **Look for:** `totalViolations > 0` on any constraint. Azure Policy can silently deny pod creation if the pod spec doesn't comply (e.g., missing resource limits, privileged container, disallowed image registry).
+
+### Webhook Issue Diagnosis Matrix
+
+| Symptom | Cause | Verification | Fix |
+|---------|-------|-------------|-----|
+| Pod never created, no error in deployment | Validating webhook silently denied | `kubectl get events -n <ns> \| grep webhook` | Fix pod spec to comply with policy, or exempt namespace |
+| Pod spec mutated unexpectedly | Mutating webhook injecting/changing fields | `kubectl get pod <pod> -o yaml` — compare with deployment spec | Check mutating webhook configs, Istio injection labels |
+| ALL pod creation failing across namespaces | Webhook service down + failurePolicy=Fail | `kubectl get pods -n <webhook-ns>` — webhook pods not Ready | Fix webhook pods, or temporarily set failurePolicy=Ignore |
+| Istio sidecar missing | Namespace not labeled for injection | `kubectl get ns <ns> --show-labels` | Add label: `kubectl label namespace <ns> istio-injection=enabled` |
+| 503 between services | mTLS STRICT + service missing sidecar | `kubectl get peerauthentication -n <ns>` | Set PERMISSIVE mode during migration, or add sidecar |
+| Azure Policy blocking pod | Pod spec violates Gatekeeper constraint | `kubectl describe constraint <name>` — check violations | Fix pod spec (add resource limits, use allowed registry, etc.) |
+
+### KB Cross-Reference (Layer 9)
+
+```
+STEP 1: hivemind_query_memory(client=<client>, query="<service> istio sidecar mTLS PeerAuthentication")
+        → Find Istio configuration in Helm values or KB
+STEP 2: hivemind_query_memory(client=<client>, query="<service> DestinationRule virtualservice")
+        → Find Istio traffic policies
+STEP 3: hivemind_query_memory(client=<client>, query="webhook admission policy gatekeeper")
+        → Find webhook or policy configurations
+STEP 4: hivemind_impact_analysis(client=<client>, entity="<service>")
+        → Check if mTLS/webhook issue is cascading to dependents
+```
+
+### Sherlock Correlation (Layer 9)
+
+**Path A (Sherlock available):**
+
+| Data Needed | Sherlock Tool |
+|-------------|---------------|
+| 503 error spike (mTLS failures) | `mcp_sherlock_get_service_golden_signals(service_name="<service>")` |
+| Service-to-service call failures | `mcp_sherlock_get_service_dependencies(service_name="<service>")` |
+| Timing: did failures start with Istio upgrade? | `mcp_sherlock_get_deployments(app_name="istiod")` |
+| Error logs mentioning mTLS/TLS | `mcp_sherlock_search_logs(service_name="<service>", keyword="mTLS|TLS|handshake|RBAC|denied")` |
+
+**Path B (Sherlock unavailable) — fallback commands:**
+```bash
+# Check for webhook-related events
+kubectl get events -n <namespace> --sort-by='.lastTimestamp' | grep -i "webhook\|admission\|denied"
+
+# Check Istio proxy logs for mTLS errors
+kubectl logs <pod> -n <namespace> -c istio-proxy --tail=50
+
+# Test service-to-service connectivity through mesh
+kubectl exec <pod> -n <namespace> -c <app-container> -- curl -sv http://<target-service>:<port>/health
+```
+State: `"⚠️ Sherlock unavailable — proceeding with command-based investigation"`
+
+### Common nginx→Istio Migration Gotchas
+
+| Issue | Root Cause | Symptoms | Fix |
+|-------|-----------|----------|-----|
+| Services that bypassed mTLS under nginx now fail | Istio STRICT mode enforces mTLS on all mesh traffic | `connection refused` between services | Set PeerAuthentication to PERMISSIVE during migration, then STRICT after all services have sidecars |
+| nginx ingress annotations still present | Istio doesn't read nginx annotations (`nginx.ingress.kubernetes.io/*`) | Ingress rules not applied, routing broken | Replace nginx annotations with Istio VirtualService and Gateway resources |
+| Health check endpoints failing | Kubelet can't do mTLS → liveness/readiness probes fail through the mesh | CrashLoopBackOff or pods removed from service | Istio automatically redirects probe traffic; if not working, check `holdApplicationUntilProxyStarts` |
+| Session affinity breaking | Istio uses different load balancing (round-robin by default) | Users losing session state | Configure DestinationRule with `consistentHash` for session-based routing |
+| Timeout differences | nginx had custom timeouts, Istio has its own defaults | Timeout errors on slow endpoints | Configure timeout in VirtualService or DestinationRule |
+| 503 errors during pod startup | App container starts before Istio proxy is ready | Intermittent 503s on deployment | Set `holdApplicationUntilProxyStarts: true` in mesh config |
+
+---
+
 ## AKS-Specific Gotchas
 
 ### Managed Identity vs Service Principal
@@ -1008,6 +1523,124 @@ az vm list-usage --location <region> -o table | Select-String "<vm-sku>"
 3. Wait 2-3 minutes for Azure to detach the disk
 4. If still attached: check in Azure portal → Disks → verify disk is not attached to old VMSS instance
 5. Long-term fix: use Azure File (`ReadWriteMany`) for workloads that scale or move frequently
+
+### Istio Service Mesh on AKS (nginx→Istio Migration)
+
+**Critical subsection — this platform recently migrated from nginx ingress to Istio service mesh.**
+
+#### mTLS STRICT Mode Blocking Services Without Sidecars
+
+When `PeerAuthentication` is set to `STRICT` in a namespace or mesh-wide, ALL traffic must be mTLS-encrypted. Services without Istio sidecars cannot communicate with services inside the mesh.
+
+```bash
+# Check mesh-wide mTLS policy
+kubectl get peerauthentication -n istio-system
+
+# Check namespace-level policy
+kubectl get peerauthentication -n <namespace>
+
+# Find pods without sidecars (vulnerable to STRICT mode)
+kubectl get pods -n <namespace> -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[*].name}{"\n"}{end}' | grep -v istio-proxy
+```
+
+**Fix:** During migration, use `PERMISSIVE` mode (accepts both plaintext and mTLS). Switch to `STRICT` only after confirming all services have sidecars.
+
+#### Istio Sidecar Startup Ordering
+
+**Problem:** Application container starts before Istio proxy is ready → outbound requests fail during startup.
+
+**Symptom:** Intermittent `connection refused` or `503` errors on pod startup. Spring Boot `BeanCreationException` calling downstream services during init.
+
+**Fix:** Set in Istio mesh config:
+```yaml
+meshConfig:
+  defaultConfig:
+    holdApplicationUntilProxyStarts: true
+```
+
+**Verify:**
+```bash
+# Check if mesh config has the setting
+kubectl get configmap istio -n istio-system -o jsonpath='{.data.mesh}' | grep holdApplication
+
+# Check if pod has the annotation override
+kubectl get pod <pod> -n <namespace> -o jsonpath='{.metadata.annotations.proxy\.istio\.io/config}'
+```
+
+#### Istio Circuit Breaker vs Application-Level Circuit Breaker
+
+**Conflict:** Spring Boot apps using Resilience4j circuit breaker + Istio DestinationRule `outlierDetection` → double circuit breaking with different thresholds, causing unpredictable behavior.
+
+```bash
+# Check Istio circuit breaker config
+kubectl get destinationrule -n <namespace> -o yaml | grep -A 10 outlierDetection
+```
+
+**Rule:** Use ONE circuit breaker — either Istio or application-level. If using Istio, disable application-level circuit breaker for mesh-internal calls.
+
+#### Istio Retry Policies Conflicting with Spring Boot Retry
+
+**Problem:** Both Istio VirtualService retries and Spring Retry/Resilience4j retry the same request → total retries = (Istio retries) × (app retries) → request amplification under failure.
+
+```bash
+# Check Istio retry config
+kubectl get virtualservice -n <namespace> -o yaml | grep -A 5 retries
+```
+
+**Fix:** Coordinate retry counts. Prefer application-level retries for business logic, Istio retries for transient network failures only.
+
+#### Envoy Proxy Memory Overhead
+
+**Impact:** Each Istio sidecar (Envoy proxy) adds 50-100MB memory overhead per pod.
+
+```bash
+# Check proxy resource usage
+kubectl top pod <pod> -n <namespace> --containers
+# Look for istio-proxy container memory usage
+```
+
+**Important for resource-constrained pods:** After Istio migration, pods that were at memory limits may OOMKill because the sidecar adds overhead. Increase container memory limits to account for proxy.
+
+#### Istio Upgrade Sequence
+
+**Rule:** Always upgrade control plane (istiod) BEFORE data plane (sidecars).
+
+```bash
+# Check control plane version
+kubectl get pods -n istio-system -l app=istiod -o jsonpath='{.items[*].spec.containers[0].image}'
+
+# Check data plane version (per pod)
+kubectl get pods -n <namespace> -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[?(@.name=="istio-proxy")].image}{"\n"}{end}'
+```
+
+**Skew policy:** Data plane can be at most 1 minor version behind control plane. Incompatible versions cause mTLS failures and config sync issues.
+
+#### Istio Debugging Commands
+
+```bash
+# Analyze namespace for configuration issues
+istioctl analyze -n <namespace>
+
+# Check proxy synchronization status
+istioctl proxy-status
+
+# Check proxy cluster config for a pod
+istioctl proxy-config cluster <pod> -n <namespace>
+
+# Check proxy listener config
+istioctl proxy-config listener <pod> -n <namespace>
+
+# Check proxy routes
+istioctl proxy-config route <pod> -n <namespace>
+
+# Get Envoy proxy access logs
+kubectl logs <pod> -n <namespace> -c istio-proxy --tail=100
+```
+
+**KB tools:**
+- `hivemind_query_memory(client=<client>, query="istio PeerAuthentication DestinationRule VirtualService")` — Istio traffic config
+- `hivemind_query_memory(client=<client>, query="istio mesh config holdApplicationUntilProxyStarts")` — mesh config
+- `hivemind_query_memory(client=<client>, query="<service> istio sidecar injection annotation")` — per-service Istio config
 
 ---
 

@@ -6,8 +6,15 @@ description: >
   is broken, failing, or unexplained. Triggers: why, failed, broken, error,
   incident, stuck, not working, root cause, 502, unauthorized, timeout,
   CrashLoopBackOff, ImagePullBackOff.
-tools: ['query-memory', 'query-graph', 'search-files', 'get-pipeline', 'get-secret-flow', 'impact-analysis', 'diff-branches', 'list-branches']
+tools:
+  - read
+  - search
+user-invocable: true
 handoffs:
+  - label: "Generate Postmortem"
+    agent: hivemind-team-lead
+    prompt: "Generate a postmortem for the investigation above."
+    send: false
   - label: "-> DevOps (pipeline/deploy root cause)"
     agent: hivemind-devops
     prompt: "Investigator context: {{paste your findings here}}. Dig into pipeline: "
@@ -19,10 +26,6 @@ handoffs:
   - label: "-> Architect (infra root cause)"
     agent: hivemind-architect
     prompt: "Investigator context: {{paste your findings here}}. Check infra for: "
-    send: false
-  - label: "-> Team Lead (root cause identified)"
-    agent: hivemind-team-lead
-    prompt: "Root cause identified. Investigator findings: {{paste your findings here}}."
     send: false
 ---
 
