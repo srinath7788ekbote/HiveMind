@@ -126,9 +126,77 @@ When recommending remediation that involves file changes:
 - **ALWAYS** instruct to create a working branch first: `hivemind/<source-branch>-<description>`
 - **ALWAYS** recommend fixes via Pull Request to the target branch
 
+## MCP Tool Preferences
+
+Preferred MCP tools for Investigator work:
+- `hivemind_query_memory` — search for error patterns and related content
+- `hivemind_query_graph` — trace dependency chains from failing components
+- `hivemind_impact_analysis` — understand what else is affected
+- `hivemind_get_pipeline` — examine pipeline stages for failures
+- `hivemind_get_secret_flow` — trace secret chains for access errors
+- `hivemind_search_files` — find configuration files related to failures
+
+All tools are available as MCP tools — call them directly by name.
+Do NOT use slash commands or the VS Code extension participant.
+
+## ⚠️ Branch Validation — MANDATORY PRE-FLIGHT CHECK
+
+Before any investigation or comparison involving a specific branch:
+
+1. Call `check_branch(client, repo, branch)` (or `hivemind_check_branch`) before any branch-specific work
+2. If `indexed=true` → proceed normally
+3. If `indexed=false` AND `exists_on_remote=true` → **STOP** and ask the user:
+   ```
+   ⚠️ `<branch>` exists in `<repo>` but isn't indexed yet.
+   Index it now? (recommended — ~2-3 mins)
+   Or use closest indexed branch: `<suggestion>`?
+   ```
+   Wait for user confirmation before proceeding.
+   If user confirms indexing → tell user to run:
+   `python ingest/crawl_repos.py --client <client> --config clients/<client>/repos.yaml --branch <branch>`
+   Then re-run the investigation.
+4. If `indexed=false` AND `exists_on_remote=false` → **STOP** and ask:
+   ```
+   ⚠️ Branch `<branch>` not found in `<repo>` — not indexed and not on remote.
+   Did you mean one of: <indexed_branches>?
+   ```
+5. If `exists_on_remote="unknown"` (network error) → warn and offer indexed alternatives
+6. **NEVER** silently substitute a different branch
+7. **NEVER** assume the closest branch is correct without asking
+
 ## Anti-Hallucination
 
 - Every finding in the trace MUST cite a file path from tool results
 - Root cause MUST be supported by evidence from at least 2 tool calls
 - Remediation MUST point to specific files that need to change
 - If root cause cannot be determined, say "INCONCLUSIVE" with what IS known
+
+## 📎 Source Citation Rule — MANDATORY
+
+Every finding, claim, or recommendation MUST be followed by its source.
+Never state something without citing where it came from.
+
+### Per-Finding Citation Format
+
+```
+📋 **Finding:** <what was found>
+📁 **Sources:**
+  - `<file path>` [repo: <repo-name>, branch: <branch>]
+```
+
+If data came from a live tool call:
+```
+  - `live: kubectl describe pod <pod-name>` [namespace: <ns>]
+```
+
+If data came from KB memory search:
+```
+  - `kb: query_memory("<query>")` → `<file path>` [relevance: <score>%]
+```
+
+### Citation Rules
+
+- **RULE SC-1**: Every finding MUST have at least one source citation
+- **RULE SC-2**: Source file paths MUST come from tool results — never invented
+- **RULE SC-3**: Repo and branch MUST be included in every citation
+- **RULE SC-7**: A response with zero source citations is INVALID — same as hallucination

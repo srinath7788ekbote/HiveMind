@@ -1,14 +1,14 @@
 @echo off
 REM ============================================================
-REM  HiveMind — Start Background Watcher
+REM  HiveMind — Start Background Watcher + MCP Server Validation
 REM ============================================================
-REM  Launches the repo watcher daemon that monitors for Git
-REM  changes and re-indexes automatically.
+REM  Validates MCP server health, then launches the repo watcher
+REM  daemon that monitors for Git changes and re-indexes.
 REM ============================================================
 
 echo.
 echo ============================================================
-echo   HiveMind — Starting Background Watcher
+echo   HiveMind — Starting
 echo ============================================================
 echo.
 
@@ -36,6 +36,20 @@ if exist .venv\Scripts\activate.bat (
     call .venv\Scripts\activate.bat
 )
 
+REM --- Install MCP dependency ---
+echo [0/3] Installing MCP dependencies...
+pip install mcp --quiet 2>nul
+
+REM --- Validate MCP server ---
+echo [1/3] Testing MCP server...
+python hivemind_mcp\hivemind_server.py --test
+if %ERRORLEVEL% NEQ 0 (
+    echo.
+    echo ERROR: MCP server failed self-test. Check hivemind_mcp\hivemind_server.py
+    exit /b 1
+)
+echo.
+
 REM --- Read active client ---
 set CLIENT=
 if exist memory\active_client.txt (
@@ -54,12 +68,12 @@ if "%CLIENT%"=="" (
 )
 
 REM --- Run initial ingest ---
-echo [1/2] Running initial ingest for client: %CLIENT%...
+echo [2/3] Running initial ingest for client: %CLIENT%...
 python ingest\crawl_repos.py --client %CLIENT% --config clients\%CLIENT%\repos.yaml --verbose
 echo.
 
 REM --- Start watcher ---
-echo [2/2] Starting background watcher...
+echo [3/3] Starting background watcher...
 start /B "HiveMind Watcher" python sync\watch_repos.py
 
 REM --- Wait a moment and check ---
@@ -75,6 +89,7 @@ if exist memory\watcher.pid (
 echo.
 echo ============================================================
 echo   HiveMind is running.
+echo   MCP server: OK (Copilot connects via .vscode/mcp.json)
 echo   The watcher will re-index repos when changes are detected.
 echo   Run stop_hivemind.bat to stop the watcher.
 echo ============================================================

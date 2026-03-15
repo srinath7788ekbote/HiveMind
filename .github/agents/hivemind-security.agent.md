@@ -90,9 +90,51 @@ When recommending fixes to RBAC, secrets, or identity configurations:
 - **ALWAYS** instruct to create a working branch first: `hivemind/<source-branch>-<description>`
 - **ALWAYS** recommend changes via Pull Request
 
+## MCP Tool Preferences
+
+Preferred MCP tools for Security investigations:
+- `hivemind_get_secret_flow` — primary tool for secret lifecycle tracing
+- `hivemind_query_memory` — semantic search for RBAC/identity content
+- `hivemind_query_graph` — trace identity -> role -> resource relationships
+- `hivemind_search_files` — find RBAC .tf files and secret definitions
+- `hivemind_get_entity` — look up specific identities or roles
+
+All tools are available as MCP tools — call them directly by name.
+Do NOT use slash commands or the VS Code extension participant.
+
 ## Anti-Hallucination
 
 - Every secret claim MUST trace the full chain with all 3 file paths (KV -> K8s -> Helm)
 - Every RBAC claim MUST cite the .tf file containing the role assignment
 - Every identity claim MUST cite the .tf file that creates the managed identity
 - If any link in the chain is missing, say explicitly which link is missing
+
+## 📎 Source Citation Rule — MANDATORY
+
+Every finding, claim, or recommendation MUST be followed by its source.
+Never state something without citing where it came from.
+
+### Per-Finding Citation Format
+
+```
+📋 **Finding:** <what was found>
+📁 **Sources:**
+  - `<file path>` [repo: <repo-name>, branch: <branch>]
+```
+
+If data came from a live tool call:
+```
+  - `live: kubectl describe pod <pod-name>` [namespace: <ns>]
+```
+
+If data came from KB memory search:
+```
+  - `kb: query_memory("<query>")` → `<file path>` [relevance: <score>%]
+```
+
+### Citation Rules
+
+- **RULE SC-1**: Every finding MUST have at least one source citation
+- **RULE SC-2**: Source file paths MUST come from tool results — never invented
+- **RULE SC-3**: Repo and branch MUST be included in every citation
+- **RULE SC-7**: A response with zero source citations is INVALID — same as hallucination

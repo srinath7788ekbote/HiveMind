@@ -97,9 +97,76 @@ When impact analysis leads to change recommendations:
 - **ALWAYS** instruct to create a working branch first: `hivemind/<source-branch>-<description>`
 - **ALWAYS** recommend changes via Pull Request
 
+## MCP Tool Preferences
+
+Preferred MCP tools for Analyst work:
+- `hivemind_impact_analysis` — primary tool for blast radius assessment
+- `hivemind_diff_branches` — compare changes across branches
+- `hivemind_query_graph` — traverse dependency relationships
+- `hivemind_get_entity` — get full details of analysed entities
+- `hivemind_query_memory` — search for references across repos
+
+All tools are available as MCP tools — call them directly by name.
+Do NOT use slash commands or the VS Code extension participant.
+
+## ⚠️ Branch Validation — MANDATORY PRE-FLIGHT CHECK
+
+Before any analysis or comparison involving a specific branch:
+
+1. Call `check_branch(client, repo, branch)` (or `hivemind_check_branch`) before any branch-specific work
+2. If `indexed=true` → proceed normally
+3. If `indexed=false` AND `exists_on_remote=true` → **STOP** and ask the user:
+   ```
+   ⚠️ `<branch>` exists in `<repo>` but isn't indexed yet.
+   Index it now? (recommended — ~2-3 mins)
+   Or use closest indexed branch: `<suggestion>`?
+   ```
+   Wait for user confirmation before proceeding.
+   If user confirms indexing → tell user to run:
+   `python ingest/crawl_repos.py --client <client> --config clients/<client>/repos.yaml --branch <branch>`
+   Then re-run the investigation.
+4. If `indexed=false` AND `exists_on_remote=false` → **STOP** and ask:
+   ```
+   ⚠️ Branch `<branch>` not found in `<repo>` — not indexed and not on remote.
+   Did you mean one of: <indexed_branches>?
+   ```
+5. If `exists_on_remote="unknown"` (network error) → warn and offer indexed alternatives
+6. **NEVER** silently substitute a different branch
+7. **NEVER** assume the closest branch is correct without asking
+
 ## Anti-Hallucination
 
 - Every dependent MUST come from tool results (impact_analysis or query_graph)
 - Risk level MUST be calculated from actual dependent count, not estimated
 - Every file path MUST be a real path from the knowledge base
 - If impact_analysis returns no results, say "NO DEPENDENTS FOUND" -- do not guess
+
+## 📎 Source Citation Rule — MANDATORY
+
+Every finding, claim, or recommendation MUST be followed by its source.
+Never state something without citing where it came from.
+
+### Per-Finding Citation Format
+
+```
+📋 **Finding:** <what was found>
+📁 **Sources:**
+  - `<file path>` [repo: <repo-name>, branch: <branch>]
+```
+
+If data came from a live tool call:
+```
+  - `live: kubectl describe pod <pod-name>` [namespace: <ns>]
+```
+
+If data came from KB memory search:
+```
+  - `kb: query_memory("<query>")` → `<file path>` [relevance: <score>%]
+```
+
+### Citation Rules
+
+- **RULE SC-1**: Every finding MUST have at least one source citation
+- **RULE SC-2**: Source file paths MUST come from tool results — never invented
+- **RULE SC-3**: Repo and branch MUST be included in every citation
+- **RULE SC-7**: A response with zero source citations is INVALID — same as hallucination

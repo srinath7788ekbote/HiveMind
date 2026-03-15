@@ -67,11 +67,14 @@ UNIT_TESTS = [
     "test_set_client",
     "test_diff_branches",
     "test_list_branches",
+    "test_mcp_server",
+    "test_skill_files",
 ]
 
 INTEGRATION_TESTS = [
     "test_full_ingest",
     "test_branch_awareness",
+    "test_mcp_integration",
 ]
 
 

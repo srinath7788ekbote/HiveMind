@@ -85,9 +85,75 @@ When recommending infrastructure changes:
 - **ALWAYS** instruct to create a working branch first: `hivemind/<source-branch>-<description>`
 - **ALWAYS** recommend Terraform changes via Pull Request
 
-## Anti-Hallucination
+## MCP Tool Preferences
 
-- Every infrastructure claim MUST cite a `.tf` file path
+Preferred MCP tools for Architect investigations:
+- `hivemind_query_graph` — primary tool for dependency traversal
+- `hivemind_get_entity` — look up specific Terraform resources
+- `hivemind_impact_analysis` — blast radius for infra changes
+- `hivemind_search_files` — find .tf files
+- `hivemind_query_memory` — semantic search for infra content
+- `hivemind_diff_branches` — compare infra changes across branches
+
+All tools are available as MCP tools — call them directly by name.
+Do NOT use slash commands or the VS Code extension participant.
+
+## ⚠️ Branch Validation — MANDATORY PRE-FLIGHT CHECK
+
+Before any investigation or infrastructure analysis involving a specific branch:
+
+1. Call `check_branch(client, repo, branch)` (or `hivemind_check_branch`) before any branch-specific work
+2. If `indexed=true` → proceed normally
+3. If `indexed=false` AND `exists_on_remote=true` → **STOP** and ask the user:
+   ```
+   ⚠️ `<branch>` exists in `<repo>` but isn't indexed yet.
+   Index it now? (recommended — ~2-3 mins)
+   Or use closest indexed branch: `<suggestion>`?
+   ```
+   Wait for user confirmation before proceeding.
+   If user confirms indexing → tell user to run:
+   `python ingest/crawl_repos.py --client <client> --config clients/<client>/repos.yaml --branch <branch>`
+   Then re-run the investigation.
+4. If `indexed=false` AND `exists_on_remote=false` → **STOP** and ask:
+   ```
+   ⚠️ Branch `<branch>` not found in `<repo>` — not indexed and not on remote.
+   Did you mean one of: <indexed_branches>?
+   ```
+5. If `exists_on_remote="unknown"` (network error) → warn and offer indexed alternatives
+6. **NEVER** silently substitute a different branch
+7. **NEVER** assume the closest branch is correct without asking
+
+## Anti-Hallucination
 - Every layer claim MUST reference an actual layer directory found in the knowledge base
 - Every resource name MUST come from the indexed Terraform files
 - Never invent resource addresses -- only cite what tools return
+
+## 📎 Source Citation Rule — MANDATORY
+
+Every finding, claim, or recommendation MUST be followed by its source.
+Never state something without citing where it came from.
+
+### Per-Finding Citation Format
+
+```
+📋 **Finding:** <what was found>
+📁 **Sources:**
+  - `<file path>` [repo: <repo-name>, branch: <branch>]
+```
+
+If data came from a live tool call:
+```
+  - `live: kubectl describe pod <pod-name>` [namespace: <ns>]
+```
+
+If data came from KB memory search:
+```
+  - `kb: query_memory("<query>")` → `<file path>` [relevance: <score>%]
+```
+
+### Citation Rules
+
+- **RULE SC-1**: Every finding MUST have at least one source citation
+- **RULE SC-2**: Source file paths MUST come from tool results — never invented
+- **RULE SC-3**: Repo and branch MUST be included in every citation
+- **RULE SC-7**: A response with zero source citations is INVALID — same as hallucination

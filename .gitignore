@@ -26,11 +26,11 @@ memory/*
 *.db
 
 # ============================================
-# VS Code extension build artifacts
+# VS Code extension build artifacts (legacy)
 # ============================================
-vscode-extension/node_modules/
-vscode-extension/out/
-vscode-extension/*.vsix
+vscode-extension-legacy/node_modules/
+vscode-extension-legacy/out/
+vscode-extension-legacy/*.vsix
 
 # OS
 Thumbs.db
@@ -39,7 +39,8 @@ Desktop.ini
 
 # IDE
 .idea/
-.vscode/
+.vscode/*
+!.vscode/mcp.json.example
 *.swp
 *.swo
 *~
