@@ -21,10 +21,13 @@ help:
 	@echo    make sync CLIENT=xxx    Sync single client
 	@echo    make chromadb           Populate ChromaDB (all clients)
 	@echo    make chromadb CLIENT=xxx Populate ChromaDB (one client)
+	@echo    make chromadb-all       Populate ChromaDB for all discovered clients
 	@echo    make status             Show KB status (all clients)
 	@echo    make status CLIENT=xxx  Show KB status (one client)
 	@echo    make test               Run test suite
 	@echo    make server             Start MCP server
+	@echo    make start              Start HiveMind background watcher
+	@echo    make stop               Stop HiveMind background watcher
 	@echo    make add-client         Add new client (interactive)
 	@echo    make docs               Open the usage guide
 	@echo    make verify             Run tests + KB status + ChromaDB check
@@ -96,7 +99,7 @@ add-client:
 
 # ── docs ─────────────────────────────────────────────────
 docs:
-	@code \USAGE_GUIDE.md
+	@code USAGE_GUIDE.md
 
 # ── verify ───────────────────────────────────────────────
 verify:
@@ -128,4 +131,16 @@ save-investigation:
 	@echo    OR: @hivemind-team-lead save this investigation
 	@echo.
 
-.PHONY: help setup crawl-all crawl sync chromadb status test server add-client docs verify recall save-investigation
+# ── chromadb-all ─────────────────────────────────────────
+chromadb-all:
+	@.venv\Scripts\python scripts\populate_all_chromadb.py
+
+# ── start ────────────────────────────────────────────────
+start:
+	@start_hivemind.bat
+
+# ── stop ─────────────────────────────────────────────────
+stop:
+	@stop_hivemind.bat
+
+.PHONY: help setup crawl-all crawl sync chromadb chromadb-all status test server add-client docs verify recall save-investigation start stop

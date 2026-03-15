@@ -2,7 +2,7 @@
 
 ## Overview
 
-HiveMind is a local-first SRE knowledge assistant that indexes your infrastructure repos (Terraform, Harness pipelines, Helm charts, Kubernetes secrets) into a searchable knowledge base and exposes them through 16 MCP tools, 7 specialist AI agents, and 5 slash-command skills — all inside VS Code. You ask questions in natural language, and HiveMind answers using your actual infrastructure data with file-path citations.
+HiveMind is a local-first SRE knowledge assistant that indexes your infrastructure repos (Terraform, Harness pipelines, Helm charts, Kubernetes secrets) into a searchable knowledge base and exposes them through 16 MCP tools, 7 specialist AI agents, and 10 slash-command skills — all inside VS Code. You ask questions in natural language, and HiveMind answers using your actual infrastructure data with file-path citations.
 
 ```
   You paste logs / ask a question
@@ -203,6 +203,11 @@ Transitive: audit-service, reporting-service (via billing-service)
 | `/secrets` | Secret, KeyVault, or credential failures | Full secret chain audit: Terraform → KeyVault → CSI → Pod → App |
 | `/postmortem` | After an investigation is complete | Generates structured RCA report with timeline, contributing factors, MTTR |
 | `/recall` | "Have we seen this before?" | Searches past saved investigations for similar incidents |
+| `/cert-audit` | TLS, certificate, or mTLS failures | TLS/certificate chain investigation: Istio mTLS, cert-manager, KeyVault certs, JVM truststores, ingress TLS |
+| `/db` | Database or messaging issues | Database and messaging investigation: connection pools, migrations, deadlocks, replication, message queues |
+| `/perf` | Performance degradation or slowness | Performance investigation: latency, throughput, memory leaks, CPU throttling, GC pressure, thread exhaustion |
+| `/diff-branches` | Compare branches | Structured diff between Git branches categorized by file type (pipeline/terraform/helm) |
+| `/get-entity` | Entity details lookup | Full entity profile: metadata, graph edges, related files |
 
 **How to invoke each:**
 
@@ -217,6 +222,21 @@ Transitive: audit-service, reporting-service (via billing-service)
 (run this after you've completed an investigation in the same chat)
 
 /recall tagging-service CrashLoopBackOff
+
+/cert-audit tagging-service
+(investigates TLS/cert issues for the service)
+
+/db tagging-service
+(investigates database connectivity, pool exhaustion, migration issues)
+
+/perf tagging-service
+(investigates latency spikes, memory leaks, CPU throttling)
+
+/diff-branches release_26_2 release_26_3
+(compare two branches with categorized file diffs)
+
+/get-entity auth-service
+(full entity profile with relationships and file references)
 ```
 
 ---
@@ -294,6 +314,11 @@ HiveMind searches past saved investigations and returns matching root causes and
 | `/secrets` | Same as Copilot — secret audit |
 | `/postmortem` | Same as Copilot — explicit postmortem only |
 | `/recall` | Same as Copilot — investigation memory |
+| `/cert-audit` | Same as Copilot — TLS/certificate investigation |
+| `/db` | Same as Copilot — database/messaging investigation |
+| `/perf` | Same as Copilot — performance investigation |
+| `/diff-branches` | Same as Copilot — structured branch diff |
+| `/get-entity` | Same as Copilot — entity profile lookup |
 
 ### Parallel subagents (Claude Agent exclusive)
 
@@ -507,7 +532,7 @@ Use Python 3.12 or 3.13 — ChromaDB does not support Python 3.14+.
 5. "Have we seen this before?" or /recall <service> <error>
 ```
 
-### 5 Most Useful Slash Commands
+### All 10 Slash Commands
 
 ```
 /triage [paste logs]           Full incident investigation
@@ -515,6 +540,11 @@ Use Python 3.12 or 3.13 — ChromaDB does not support Python 3.14+.
 /secrets <service-name>        Secret chain audit
 /postmortem                    Generate RCA report (after investigation)
 /recall <service> <error>      Search past investigations
+/cert-audit <service-name>     TLS/certificate chain investigation
+/db <service-name>             Database/messaging investigation
+/perf <service-name>           Performance degradation investigation
+/diff-branches <branch1> <branch2>  Structured branch diff
+/get-entity <entity-name>     Full entity profile lookup
 ```
 
 ### Make Commands Cheat Sheet
@@ -524,11 +554,16 @@ make setup              First-time setup (venv + deps)
 make add-client         Add a new client (interactive wizard)
 make crawl CLIENT=x     Index a single client (~2 hours)
 make chromadb CLIENT=x  Populate ChromaDB (~3 hours, optional)
+make chromadb-all       Populate ChromaDB for all clients
 make server             Start MCP server (keep running)
+make start              Start HiveMind background watcher daemon
+make stop               Stop HiveMind background watcher daemon
 make sync               Daily sync — updates changed files (~5 min)
 make status             Check what's indexed (instant)
 make test               Run test suite
+make verify             Run tests + KB status + ChromaDB check
 make crawl-all          Re-index all clients (slow)
+make recall CLIENT=x QUERY=y  Search past investigations
 ```
 
 ### When to Use Copilot Chat vs Claude Agent

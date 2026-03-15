@@ -1,6 +1,6 @@
 # HiveMind — Local-First Multi-Agent SRE Assistant
 
-A local-first SRE knowledge assistant powered by GitHub Copilot Chat and Claude Agent. Index your infrastructure repos (Terraform, Harness, Helm, NewRelic) and query them through 7 specialist AI agents, 16 MCP tools, and 5 slash-command skills — no external APIs, no cloud dependencies, zero data leaving your machine.
+A local-first SRE knowledge assistant powered by GitHub Copilot Chat and Claude Agent. Index your infrastructure repos (Terraform, Harness, Helm, NewRelic) and query them through 7 specialist AI agents, 16 MCP tools, and 10 slash-command skills — no external APIs, no cloud dependencies, zero data leaving your machine.
 
 Works with any client — multi-tenant architecture discovers and indexes all configured clients automatically.
 
@@ -27,7 +27,7 @@ Works with any client — multi-tenant architecture discovers and indexes all co
   └──────┬──────┘
          ▼
   ┌─────────────────┐
-  │  Copilot Chat /  │  7 agents + 5 skills → answers grounded in YOUR infra
+  │  Copilot Chat /  │  7 agents + 10 skills → answers grounded in YOUR infra
   │  Claude Agent    │  (Claude Agent adds parallel subagents + handoffs)
   └─────────────────┘
 ```
@@ -55,6 +55,11 @@ Works with any client — multi-tenant architecture discovers and indexes all co
 | secret-audit | `/secret-audit` | Secret lifecycle audit |
 | postmortem | `/postmortem` | Post-incident review generator |
 | investigation-memory | `/investigation-memory` | Save/recall past investigations |
+| cert-audit | `/cert-audit` | TLS/certificate chain investigation |
+| db-debug | `/db` | Database and messaging investigation |
+| perf-debug | `/perf` | Performance degradation investigation |
+| diff-branches | `/diff-branches` | Structured branch diff by file type |
+| get-entity | `/get-entity` | Full entity profile lookup |
 
 ### Copilot Chat vs Claude Agent
 
@@ -161,7 +166,7 @@ HiveMind/
 ├── .github/
 │   ├── copilot-instructions.md     # Auto-loaded system prompt
 │   ├── agents/                     # 7 Copilot Enterprise agents
-│   └── skills/                     # 5 skills (triage, k8s, secrets, postmortem, investigation-memory)
+│   └── skills/                     # 10 skills (triage, k8s, secrets, postmortem, investigation-memory, cert-audit, db-debug, perf-debug, diff-branches, get-entity)
 ├── clients/                        # Client configurations (gitignored)
 │   ├── _example/repos.yaml         # Template — copy to get started
 │   └── <client>/repos.yaml         # Your client config
@@ -223,9 +228,12 @@ HiveMind/
 | `make sync CLIENT=xxx` | Sync changed files — one client |
 | `make chromadb` | Populate ChromaDB vector store (all clients) |
 | `make chromadb CLIENT=xxx` | Populate ChromaDB — one client |
+| `make chromadb-all` | Populate ChromaDB for all discovered clients |
 | `make status` | Show sync status for all repos and branches |
 | `make test` | Run all 637+ tests |
 | `make server` | Start MCP server (Copilot/Claude connects to this) |
+| `make start` | Start HiveMind background watcher daemon |
+| `make stop` | Stop HiveMind background watcher daemon |
 | `make add-client` | Add a new client interactively |
 | `make docs` | Open the usage guide in VS Code |
 | `make verify` | Run tests + check KB status + verify ChromaDB |
