@@ -6,7 +6,10 @@ description: >
   role assignments, certificate management. Triggers: secret, keyvault,
   RBAC, credential, access, cert, identity, managed identity, unauthorized,
   forbidden, permission denied.
-tools: ['query-memory', 'query-graph', 'get-secret-flow', 'search-files', 'get-entity']
+tools:
+  - read
+  - search
+user-invocable: true
 handoffs:
   - label: "-> Architect (which TF layer owns this?)"
     agent: hivemind-architect

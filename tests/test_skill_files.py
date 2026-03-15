@@ -61,6 +61,9 @@ class TestSkillFilesExist(unittest.TestCase):
         "k8s-debug",
         "secret-audit",
         "postmortem",
+        "cert-audit",
+        "db-debug",
+        "perf-debug",
     ]
 
     def test_all_new_skill_files_exist(self):
@@ -105,6 +108,21 @@ class TestSkillFrontmatter(unittest.TestCase):
             "name": "postmortem",
             "slash_command": "/postmortem",
             "min_triggers": 3,
+        },
+        "cert-audit": {
+            "name": "cert-audit",
+            "slash_command": "/cert-audit",
+            "min_triggers": 10,
+        },
+        "db-debug": {
+            "name": "db-debug",
+            "slash_command": "/db",
+            "min_triggers": 10,
+        },
+        "perf-debug": {
+            "name": "perf-debug",
+            "slash_command": "/perf",
+            "min_triggers": 10,
         },
     }
 
@@ -259,6 +277,9 @@ class TestSkillConstraints(unittest.TestCase):
         "k8s-debug": {"prefix": "K-", "min_count": 8},
         "secret-audit": {"prefix": "S-", "min_count": 8},
         "postmortem": {"prefix": "P-", "min_count": 8},
+        "cert-audit": {"prefix": "CA-", "min_count": 8},
+        "db-debug": {"prefix": "DB-C", "min_count": 8},
+        "perf-debug": {"prefix": "PD-", "min_count": 8},
     }
 
     def test_constraints_section_exists(self):
@@ -292,7 +313,7 @@ class TestSkillConstraints(unittest.TestCase):
 
     def test_never_run_commands_constraint(self):
         """All investigation skills must have a NEVER-run-commands constraint."""
-        for skill_name in ["k8s-debug", "secret-audit", "postmortem"]:
+        for skill_name in ["k8s-debug", "secret-audit", "postmortem", "cert-audit", "db-debug", "perf-debug"]:
             content = read_skill(skill_name)
             if content is None:
                 self.fail(f"Missing skill file: {skill_name}")
@@ -303,7 +324,7 @@ class TestSkillConstraints(unittest.TestCase):
 
     def test_never_block_on_sherlock_constraint(self):
         """Investigation skills must have a NEVER-block-on-Sherlock constraint."""
-        for skill_name in ["k8s-debug", "secret-audit"]:
+        for skill_name in ["k8s-debug", "secret-audit", "cert-audit", "db-debug", "perf-debug"]:
             content = read_skill(skill_name)
             if content is None:
                 self.fail(f"Missing skill file: {skill_name}")
@@ -315,7 +336,7 @@ class TestSkillConstraints(unittest.TestCase):
 
     def test_always_cite_sources_constraint(self):
         """All skills must require source citation."""
-        for skill_name in ["k8s-debug", "secret-audit", "postmortem"]:
+        for skill_name in ["k8s-debug", "secret-audit", "postmortem", "cert-audit", "db-debug", "perf-debug"]:
             content = read_skill(skill_name)
             if content is None:
                 self.fail(f"Missing skill file: {skill_name}")
@@ -333,7 +354,7 @@ class TestSkillConstraints(unittest.TestCase):
 class TestSherlockFallback(unittest.TestCase):
     """Validate Sherlock fallback rule in each investigation skill."""
 
-    INVESTIGATION_SKILLS = ["k8s-debug", "secret-audit", "postmortem"]
+    INVESTIGATION_SKILLS = ["k8s-debug", "secret-audit", "postmortem", "cert-audit", "db-debug", "perf-debug"]
 
     def test_sherlock_fallback_section_exists(self):
         """Each investigation skill has a SHERLOCK FALLBACK section."""
@@ -366,7 +387,7 @@ class TestSherlockFallback(unittest.TestCase):
 
     def test_sherlock_tool_references(self):
         """Investigation skills reference at least one Sherlock MCP tool."""
-        for skill_name in ["k8s-debug", "secret-audit"]:
+        for skill_name in ["k8s-debug", "secret-audit", "cert-audit", "db-debug", "perf-debug"]:
             content = read_skill(skill_name)
             if content is None:
                 self.fail(f"Missing skill file: {skill_name}")
@@ -378,7 +399,7 @@ class TestSherlockFallback(unittest.TestCase):
 
     def test_kubectl_fallback_commands(self):
         """Investigation skills provide kubectl commands as Path B fallback."""
-        for skill_name in ["k8s-debug", "secret-audit"]:
+        for skill_name in ["k8s-debug", "secret-audit", "cert-audit", "db-debug", "perf-debug"]:
             content = read_skill(skill_name)
             if content is None:
                 self.fail(f"Missing skill file: {skill_name}")
@@ -467,6 +488,94 @@ class TestHiveMindToolReferences(unittest.TestCase):
             "hivemind_get_entity",
             content,
             "postmortem must reference hivemind_get_entity",
+        )
+
+    def test_cert_audit_references_impact_analysis(self):
+        """cert-audit must always reference hivemind_impact_analysis."""
+        content = read_skill("cert-audit")
+        if content is None:
+            self.fail("Missing skill file: cert-audit")
+        self.assertIn(
+            "hivemind_impact_analysis",
+            content,
+            "cert-audit must reference hivemind_impact_analysis for blast radius",
+        )
+
+    def test_cert_audit_references_query_memory(self):
+        """cert-audit must reference hivemind_query_memory."""
+        content = read_skill("cert-audit")
+        if content is None:
+            self.fail("Missing skill file: cert-audit")
+        self.assertIn(
+            "hivemind_query_memory",
+            content,
+            "cert-audit must reference hivemind_query_memory",
+        )
+
+    def test_db_debug_references_impact_analysis(self):
+        """db-debug must always reference hivemind_impact_analysis."""
+        content = read_skill("db-debug")
+        if content is None:
+            self.fail("Missing skill file: db-debug")
+        self.assertIn(
+            "hivemind_impact_analysis",
+            content,
+            "db-debug must reference hivemind_impact_analysis for blast radius",
+        )
+
+    def test_db_debug_references_query_memory(self):
+        """db-debug must reference hivemind_query_memory."""
+        content = read_skill("db-debug")
+        if content is None:
+            self.fail("Missing skill file: db-debug")
+        self.assertIn(
+            "hivemind_query_memory",
+            content,
+            "db-debug must reference hivemind_query_memory",
+        )
+
+    def test_db_debug_references_get_secret_flow(self):
+        """db-debug must reference hivemind_get_secret_flow."""
+        content = read_skill("db-debug")
+        if content is None:
+            self.fail("Missing skill file: db-debug")
+        self.assertIn(
+            "hivemind_get_secret_flow",
+            content,
+            "db-debug must reference hivemind_get_secret_flow",
+        )
+
+    def test_perf_debug_references_impact_analysis(self):
+        """perf-debug must always reference hivemind_impact_analysis."""
+        content = read_skill("perf-debug")
+        if content is None:
+            self.fail("Missing skill file: perf-debug")
+        self.assertIn(
+            "hivemind_impact_analysis",
+            content,
+            "perf-debug must reference hivemind_impact_analysis for blast radius",
+        )
+
+    def test_perf_debug_references_query_memory(self):
+        """perf-debug must reference hivemind_query_memory."""
+        content = read_skill("perf-debug")
+        if content is None:
+            self.fail("Missing skill file: perf-debug")
+        self.assertIn(
+            "hivemind_query_memory",
+            content,
+            "perf-debug must reference hivemind_query_memory",
+        )
+
+    def test_perf_debug_references_diff_branches(self):
+        """perf-debug must reference hivemind_diff_branches."""
+        content = read_skill("perf-debug")
+        if content is None:
+            self.fail("Missing skill file: perf-debug")
+        self.assertIn(
+            "hivemind_diff_branches",
+            content,
+            "perf-debug must reference hivemind_diff_branches for change correlation",
         )
 
 
@@ -601,6 +710,179 @@ class TestSecretAuditStructure(unittest.TestCase):
             "application.yaml",
             self.content,
             "secret-audit must cover application.yaml references",
+        )
+
+
+class TestCertAuditStructure(unittest.TestCase):
+    """Validate cert-audit skill structure and content."""
+
+    def setUp(self):
+        self.content = read_skill("cert-audit")
+        if self.content is None:
+            self.fail("Missing skill file: cert-audit")
+
+    def test_file_exists_and_substantial(self):
+        """cert-audit SKILL.md exists and has >100 lines."""
+        line_count = len(self.content.strip().split("\n"))
+        self.assertGreater(
+            line_count, 100,
+            f"cert-audit has only {line_count} lines — expected >100",
+        )
+
+    def test_six_failure_modes_defined(self):
+        """cert-audit defines all 6 failure modes (CM-1 through CM-6)."""
+        for i in range(1, 7):
+            self.assertIn(
+                f"CM-{i}",
+                self.content,
+                f"cert-audit missing failure mode CM-{i}",
+            )
+
+    def test_failure_mode_labels(self):
+        """cert-audit has named labels for each failure mode."""
+        expected_labels = [
+            "CERT EXPIRED",
+            "CERT EXPIRING SOON",
+            "CERT NOT TRUSTED",
+            "CERT WRONG DOMAIN",
+            "CERT ROTATION FAILED",
+            "MTLS HANDSHAKE FAILED",
+        ]
+        for label in expected_labels:
+            self.assertIn(
+                label,
+                self.content,
+                f"cert-audit missing failure mode label: {label}",
+            )
+
+    def test_auto_detection_section(self):
+        """cert-audit has an auto-detection phase."""
+        self.assertIn(
+            "Auto-Detection",
+            self.content,
+            "cert-audit missing Auto-Detection section",
+        )
+
+    def test_auto_detection_platforms(self):
+        """cert-audit auto-detection covers all 5 platforms."""
+        platforms = [
+            "PLATFORM A",
+            "PLATFORM B",
+            "PLATFORM C",
+            "PLATFORM D",
+            "PLATFORM E",
+        ]
+        for platform in platforms:
+            self.assertIn(
+                platform,
+                self.content,
+                f"cert-audit missing {platform} in auto-detection",
+            )
+
+    def test_five_investigation_layers(self):
+        """cert-audit has all 5 investigation layers."""
+        layers = [
+            "LAYER 1",
+            "LAYER 2",
+            "LAYER 3",
+            "LAYER 4",
+            "LAYER 5",
+        ]
+        for layer in layers:
+            self.assertIn(
+                layer,
+                self.content,
+                f"cert-audit missing {layer}",
+            )
+
+    def test_slash_command(self):
+        """cert-audit has /cert-audit slash command."""
+        fm = extract_frontmatter(self.content)
+        self.assertIn(
+            "slash_command: /cert-audit",
+            fm,
+            "cert-audit missing slash_command: /cert-audit in frontmatter",
+        )
+
+    def test_sherlock_fallback(self):
+        """cert-audit has Sherlock fallback section."""
+        self.assertIn(
+            "SHERLOCK FALLBACK",
+            self.content,
+            "cert-audit missing SHERLOCK FALLBACK section",
+        )
+
+    def test_blast_radius_section(self):
+        """cert-audit has a blast radius check section."""
+        self.assertIn(
+            "Blast Radius",
+            self.content,
+            "cert-audit missing Blast Radius section",
+        )
+
+    def test_never_run_commands(self):
+        """cert-audit has NEVER-run-commands constraint."""
+        self.assertTrue(
+            "NEVER run commands" in self.content or "NEVER run any commands" in self.content,
+            "cert-audit missing 'NEVER run commands' constraint",
+        )
+
+    def test_expiry_timeline_section(self):
+        """cert-audit has an expiry timeline section."""
+        self.assertIn(
+            "Expiry Timeline",
+            self.content,
+            "cert-audit missing Expiry Timeline section",
+        )
+
+    def test_cert_audit_report_output(self):
+        """cert-audit has a CERT AUDIT REPORT output format."""
+        self.assertIn(
+            "CERT AUDIT REPORT",
+            self.content,
+            "cert-audit missing CERT AUDIT REPORT output format",
+        )
+
+    def test_cert_manager_coverage(self):
+        """cert-audit covers cert-manager resources."""
+        self.assertIn("cert-manager", self.content, "cert-audit must cover cert-manager")
+        self.assertIn("CertificateRequest", self.content, "cert-audit must cover CertificateRequest")
+        self.assertIn("Issuer", self.content, "cert-audit must cover Issuer")
+
+    def test_istio_mtls_coverage(self):
+        """cert-audit covers Istio mTLS."""
+        self.assertIn("PeerAuthentication", self.content, "cert-audit must cover PeerAuthentication")
+        self.assertIn("DestinationRule", self.content, "cert-audit must cover DestinationRule")
+        self.assertIn("istiod", self.content, "cert-audit must cover istiod")
+
+    def test_keyvault_certificate_coverage(self):
+        """cert-audit covers Azure KeyVault certificates."""
+        self.assertIn(
+            "az keyvault certificate",
+            self.content,
+            "cert-audit must include az keyvault certificate commands",
+        )
+
+    def test_jvm_truststore_coverage(self):
+        """cert-audit covers JVM truststore/keystore."""
+        self.assertIn("javax.net.ssl", self.content, "cert-audit must cover javax.net.ssl")
+        self.assertIn("keytool", self.content, "cert-audit must cover keytool")
+        self.assertIn("PKIX", self.content, "cert-audit must cover PKIX")
+
+    def test_openssl_commands(self):
+        """cert-audit includes openssl commands for cert verification."""
+        self.assertIn(
+            "openssl",
+            self.content,
+            "cert-audit must include openssl commands",
+        )
+
+    def test_never_assume_platform_constraint(self):
+        """cert-audit has NEVER-assume-platform constraint."""
+        self.assertIn(
+            "NEVER assume platform",
+            self.content,
+            "cert-audit missing 'NEVER assume platform' constraint",
         )
 
 
@@ -848,10 +1130,464 @@ class TestIncidentTriageStructure(unittest.TestCase):
             )
 
 
+class TestDbDebugStructure(unittest.TestCase):
+    """Validate db-debug skill structure and content."""
+
+    def setUp(self):
+        self.content = read_skill("db-debug")
+        if self.content is None:
+            self.fail("Missing skill file: db-debug")
+
+    def test_file_exists_and_substantial(self):
+        """db-debug SKILL.md exists and has >100 lines."""
+        line_count = len(self.content.strip().split("\n"))
+        self.assertGreater(
+            line_count, 100,
+            f"db-debug has only {line_count} lines -- expected >100",
+        )
+
+    def test_eight_failure_modes_defined(self):
+        """db-debug defines all 8 failure modes (DB-1 through DB-8)."""
+        for i in range(1, 9):
+            self.assertIn(
+                f"DB-{i}",
+                self.content,
+                f"db-debug missing failure mode DB-{i}",
+            )
+
+    def test_failure_mode_labels(self):
+        """db-debug has named labels for each failure mode."""
+        expected_labels = [
+            "CONNECTION POOL EXHAUSTED",
+            "SLOW QUERY",
+            "MIGRATION FAILED",
+            "DEADLOCK",
+            "REPLICATION LAG",
+            "PRIMARY FAILOVER",
+            "SERVICE BUS DLQ",
+            "SERVICE BUS PROCESSING FAILURE",
+        ]
+        for label in expected_labels:
+            self.assertIn(
+                label,
+                self.content,
+                f"db-debug missing failure mode label: {label}",
+            )
+
+    def test_auto_detection_section(self):
+        """db-debug has an auto-detection phase."""
+        self.assertIn(
+            "Auto-Detection",
+            self.content,
+            "db-debug missing Auto-Detection section",
+        )
+
+    def test_auto_detection_platforms(self):
+        """db-debug auto-detection covers all 6 platforms."""
+        platforms = [
+            "PLATFORM A", "PLATFORM B", "PLATFORM C",
+            "PLATFORM D", "PLATFORM E", "PLATFORM F",
+        ]
+        for platform in platforms:
+            self.assertIn(
+                platform,
+                self.content,
+                f"db-debug missing auto-detection platform: {platform}",
+            )
+
+    def test_six_investigation_layers(self):
+        """db-debug has all 6 investigation layers."""
+        layers = ["LAYER 1", "LAYER 2", "LAYER 3", "LAYER 4", "LAYER 5", "LAYER 6"]
+        for layer in layers:
+            self.assertIn(
+                layer,
+                self.content,
+                f"db-debug missing investigation layer: {layer}",
+            )
+
+    def test_slash_command(self):
+        """db-debug has /db slash command."""
+        fm = extract_frontmatter(self.content)
+        self.assertIn(
+            "slash_command: /db",
+            fm,
+            "db-debug missing slash_command: /db in frontmatter",
+        )
+
+    def test_sherlock_fallback(self):
+        """db-debug has Sherlock fallback section with Path A and Path B."""
+        self.assertIn(
+            "SHERLOCK FALLBACK",
+            self.content,
+            "db-debug missing SHERLOCK FALLBACK section",
+        )
+        self.assertIn("Path A", self.content, "db-debug missing Path A")
+        self.assertIn("Path B", self.content, "db-debug missing Path B")
+
+    def test_blast_radius_section(self):
+        """db-debug has a blast radius check section."""
+        self.assertIn(
+            "Blast Radius",
+            self.content,
+            "db-debug missing Blast Radius section",
+        )
+
+    def test_never_run_commands(self):
+        """db-debug has NEVER-run-commands constraint."""
+        self.assertTrue(
+            "NEVER run commands" in self.content or "NEVER run any commands" in self.content,
+            "db-debug missing 'NEVER run commands' constraint",
+        )
+
+    def test_hikaricp_section(self):
+        """db-debug covers HikariCP connection pool."""
+        self.assertIn(
+            "HikariCP",
+            self.content,
+            "db-debug missing HikariCP coverage",
+        )
+        self.assertIn(
+            "maximum-pool-size",
+            self.content,
+            "db-debug missing maximum-pool-size config reference",
+        )
+
+    def test_service_bus_section(self):
+        """db-debug covers Azure Service Bus."""
+        self.assertIn(
+            "Service Bus",
+            self.content,
+            "db-debug missing Service Bus coverage",
+        )
+        self.assertIn(
+            "Dead Letter",
+            self.content,
+            "db-debug missing Dead Letter Queue coverage",
+        )
+
+    def test_spring_boot_gotchas(self):
+        """db-debug has Spring Boot / JVM gotchas section."""
+        self.assertTrue(
+            "Spring Boot" in self.content and "Gotcha" in self.content,
+            "db-debug missing Spring Boot gotchas section",
+        )
+
+    def test_postgresql_commands(self):
+        """db-debug includes PostgreSQL diagnostic commands."""
+        self.assertIn(
+            "pg_stat_activity",
+            self.content,
+            "db-debug missing pg_stat_activity reference",
+        )
+        self.assertIn(
+            "pg_stat_statements",
+            self.content,
+            "db-debug missing pg_stat_statements reference",
+        )
+
+    def test_references_impact_analysis(self):
+        """db-debug references hivemind_impact_analysis."""
+        self.assertIn(
+            "hivemind_impact_analysis",
+            self.content,
+            "db-debug missing hivemind_impact_analysis reference",
+        )
+
+    def test_references_get_secret_flow(self):
+        """db-debug references hivemind_get_secret_flow."""
+        self.assertIn(
+            "hivemind_get_secret_flow",
+            self.content,
+            "db-debug missing hivemind_get_secret_flow reference",
+        )
+
+    def test_db_debug_report_output(self):
+        """db-debug has a DB DEBUG REPORT output format."""
+        self.assertIn(
+            "DB DEBUG REPORT",
+            self.content,
+            "db-debug missing DB DEBUG REPORT output format",
+        )
+
+    def test_never_assume_platform_constraint(self):
+        """db-debug has NEVER assume constraint."""
+        self.assertTrue(
+            "NEVER assume PostgreSQL" in self.content
+            or "NEVER assume" in self.content,
+            "db-debug missing 'NEVER assume' platform constraint",
+        )
+
+    def test_generic_messaging_alternatives(self):
+        """db-debug has generic messaging alternatives (SQS, Kafka, RabbitMQ)."""
+        for platform in ["SQS", "Kafka", "RabbitMQ"]:
+            self.assertIn(
+                platform,
+                self.content,
+                f"db-debug missing generic messaging alternative: {platform}",
+            )
+
+    def test_connection_pool_variants(self):
+        """db-debug covers multiple connection pool technologies."""
+        for pool in ["HikariCP", "c3p0", "DBCP2", "pg-pool", "SQLAlchemy"]:
+            self.assertIn(
+                pool,
+                self.content,
+                f"db-debug missing connection pool variant: {pool}",
+            )
+
+    def test_migration_tool_variants(self):
+        """db-debug covers multiple migration tools."""
+        for tool in ["Flyway", "Liquibase", "Alembic"]:
+            self.assertIn(
+                tool,
+                self.content,
+                f"db-debug missing migration tool variant: {tool}",
+            )
+
+
+class TestPerfDebugStructure(unittest.TestCase):
+    """Validate perf-debug skill structure and content."""
+
+    def setUp(self):
+        self.content = read_skill("perf-debug")
+        if self.content is None:
+            self.fail("Missing skill file: perf-debug")
+
+    def test_file_exists_and_substantial(self):
+        """perf-debug SKILL.md exists and has >100 lines."""
+        line_count = len(self.content.strip().split("\n"))
+        self.assertGreater(
+            line_count, 100,
+            f"perf-debug has only {line_count} lines -- expected >100",
+        )
+
+    def test_eight_failure_modes_defined(self):
+        """perf-debug defines all 8 failure modes (PF-1 through PF-8)."""
+        for i in range(1, 9):
+            self.assertIn(
+                f"PF-{i}",
+                self.content,
+                f"perf-debug missing failure mode PF-{i}",
+            )
+
+    def test_failure_mode_labels(self):
+        """perf-debug has named labels for each failure mode."""
+        expected_labels = [
+            "LATENCY DEGRADATION",
+            "THROUGHPUT DROP",
+            "MEMORY LEAK",
+            "CPU THROTTLING",
+            "GC PRESSURE",
+            "THREAD EXHAUSTION",
+            "DEPENDENCY SLOWDOWN",
+            "RESOURCE SATURATION",
+        ]
+        for label in expected_labels:
+            self.assertIn(
+                label,
+                self.content,
+                f"perf-debug missing failure mode label: {label}",
+            )
+
+    def test_golden_signals_section(self):
+        """perf-debug has a Golden Signals section."""
+        self.assertIn(
+            "Golden Signals",
+            self.content,
+            "perf-debug missing Golden Signals section",
+        )
+
+    def test_golden_signals_four_signals(self):
+        """perf-debug Golden Signals covers latency, traffic, errors, saturation."""
+        for signal in ["Latency", "Traffic", "Errors", "Saturation"]:
+            self.assertIn(
+                signal,
+                self.content,
+                f"perf-debug Golden Signals missing signal: {signal}",
+            )
+
+    def test_sherlock_first_approach(self):
+        """perf-debug has a Sherlock-first approach section."""
+        self.assertIn(
+            "Sherlock-First",
+            self.content,
+            "perf-debug missing Sherlock-First Approach section",
+        )
+
+    def test_eight_investigation_layers(self):
+        """perf-debug has all 8 investigation layers."""
+        layers = [
+            "LAYER 1", "LAYER 2", "LAYER 3", "LAYER 4",
+            "LAYER 5", "LAYER 6", "LAYER 7", "LAYER 8",
+        ]
+        for layer in layers:
+            self.assertIn(
+                layer,
+                self.content,
+                f"perf-debug missing investigation layer: {layer}",
+            )
+
+    def test_slash_command(self):
+        """perf-debug has /perf slash command."""
+        fm = extract_frontmatter(self.content)
+        self.assertIn(
+            "slash_command: /perf",
+            fm,
+            "perf-debug missing slash_command: /perf in frontmatter",
+        )
+
+    def test_sherlock_fallback(self):
+        """perf-debug has Sherlock fallback section with Path A and Path B."""
+        self.assertIn(
+            "SHERLOCK FALLBACK",
+            self.content,
+            "perf-debug missing SHERLOCK FALLBACK section",
+        )
+        self.assertIn("Path A", self.content, "perf-debug missing Path A")
+        self.assertIn("Path B", self.content, "perf-debug missing Path B")
+
+    def test_blast_radius_section(self):
+        """perf-debug has a blast radius check section."""
+        self.assertIn(
+            "Blast Radius",
+            self.content,
+            "perf-debug missing Blast Radius section",
+        )
+
+    def test_change_correlation_section(self):
+        """perf-debug has a change correlation section."""
+        self.assertIn(
+            "Change Correlation",
+            self.content,
+            "perf-debug missing Change Correlation section",
+        )
+
+    def test_jvm_spring_boot_section(self):
+        """perf-debug has a JVM / Spring Boot section."""
+        self.assertIn(
+            "Spring Boot",
+            self.content,
+            "perf-debug missing Spring Boot section",
+        )
+        self.assertIn(
+            "JVM",
+            self.content,
+            "perf-debug missing JVM section",
+        )
+
+    def test_never_run_commands(self):
+        """perf-debug has NEVER-run-commands constraint."""
+        self.assertTrue(
+            "NEVER run commands" in self.content or "NEVER run any commands" in self.content,
+            "perf-debug missing 'NEVER run commands' constraint",
+        )
+
+    def test_never_skip_sherlock(self):
+        """perf-debug has NEVER-skip-Sherlock constraint."""
+        self.assertIn(
+            "NEVER skip Sherlock",
+            self.content,
+            "perf-debug missing 'NEVER skip Sherlock' constraint",
+        )
+
+    def test_never_heap_dump_without_approval(self):
+        """perf-debug has NEVER-heap-dump-without-approval constraint."""
+        self.assertTrue(
+            "NEVER recommend heap dump without explicit user approval" in self.content
+            or "heap dump" in self.content.lower() and "approval" in self.content.lower(),
+            "perf-debug missing heap dump approval constraint",
+        )
+
+    def test_references_impact_analysis(self):
+        """perf-debug references hivemind_impact_analysis."""
+        self.assertIn(
+            "hivemind_impact_analysis",
+            self.content,
+            "perf-debug missing hivemind_impact_analysis reference",
+        )
+
+    def test_references_diff_branches(self):
+        """perf-debug references hivemind_diff_branches."""
+        self.assertIn(
+            "hivemind_diff_branches",
+            self.content,
+            "perf-debug missing hivemind_diff_branches reference",
+        )
+
+    def test_perf_debug_report_output(self):
+        """perf-debug has a PERF DEBUG REPORT output format."""
+        self.assertIn(
+            "PERF DEBUG REPORT",
+            self.content,
+            "perf-debug missing PERF DEBUG REPORT output format",
+        )
+
+    def test_decision_matrix(self):
+        """perf-debug has a decision matrix for Golden Signals to failure mode."""
+        self.assertIn(
+            "Decision Matrix",
+            self.content,
+            "perf-debug missing Decision Matrix section",
+        )
+
+    def test_actuator_endpoints(self):
+        """perf-debug covers Spring Boot Actuator endpoints."""
+        self.assertIn(
+            "/actuator/metrics",
+            self.content,
+            "perf-debug missing Actuator metrics endpoint reference",
+        )
+
+    def test_gc_types_coverage(self):
+        """perf-debug covers GC types (Minor, Major, Full)."""
+        for gc_type in ["Minor GC", "Major GC", "Full GC"]:
+            self.assertIn(
+                gc_type,
+                self.content,
+                f"perf-debug missing GC type coverage: {gc_type}",
+            )
+
+    def test_non_jvm_platforms(self):
+        """perf-debug covers non-JVM platforms (Node.js, Python, Go)."""
+        for platform in ["Node.js", "Python", "Go"]:
+            self.assertIn(
+                platform,
+                self.content,
+                f"perf-debug missing non-JVM platform coverage: {platform}",
+            )
+
+    def test_never_diagnose_hard_failure(self):
+        """perf-debug has constraint to redirect hard failures."""
+        self.assertIn(
+            "NEVER diagnose hard failure",
+            self.content,
+            "perf-debug missing PD-10 constraint (redirect hard failures)",
+        )
+
+    def test_mandatory_sherlock_queries(self):
+        """perf-debug lists mandatory Sherlock queries (S-1 through S-8)."""
+        for i in range(1, 9):
+            self.assertIn(
+                f"S-{i}",
+                self.content,
+                f"perf-debug missing mandatory Sherlock query S-{i}",
+            )
+
+    def test_failure_mode_sherlock_signals(self):
+        """Each failure mode playbook has Sherlock-related investigation guidance."""
+        # Each PF playbook should reference how to confirm via observability
+        for i in range(1, 9):
+            self.assertIn(
+                f"PF-{i}:",
+                self.content,
+                f"perf-debug missing playbook header PF-{i}:",
+            )
+
+
 class TestCrossSkillConsistency(unittest.TestCase):
     """Validate consistency across all skills."""
 
-    SKILLS = ["incident-triage", "k8s-debug", "secret-audit", "postmortem"]
+    SKILLS = ["incident-triage", "k8s-debug", "secret-audit", "postmortem", "cert-audit", "db-debug", "perf-debug"]
 
     def test_all_skills_mention_hivemind(self):
         """All skills reference HiveMind tools or KB."""
@@ -870,7 +1606,7 @@ class TestCrossSkillConsistency(unittest.TestCase):
 
     def test_all_skills_mention_avd_or_commands(self):
         """All investigation skills mention AVD limitation or command recommendations."""
-        for skill_name in ["k8s-debug", "secret-audit", "postmortem"]:
+        for skill_name in ["k8s-debug", "secret-audit", "postmortem", "cert-audit", "db-debug", "perf-debug"]:
             content = read_skill(skill_name)
             if content is None:
                 self.fail(f"Missing skill file: {skill_name}")

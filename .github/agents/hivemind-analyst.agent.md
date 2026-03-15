@@ -5,7 +5,10 @@ description: >
   risk classification (LOW/MEDIUM/HIGH/CRITICAL). Use me before making changes.
   Triggers: impact, change, what breaks, affect, depend, blast radius,
   if I modify, safe to change, upgrade, what uses this.
-tools: ['query-memory', 'query-graph', 'impact-analysis', 'get-entity', 'search-files']
+tools:
+  - read
+  - search
+user-invocable: true
 handoffs:
   - label: "-> Planner (generate safe change runbook)"
     agent: hivemind-planner

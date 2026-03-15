@@ -1,8 +1,10 @@
 # HiveMind — Local-First Multi-Agent SRE Assistant
 
-A local-first SRE knowledge assistant powered by GitHub Copilot Chat. Index your infrastructure repos (Terraform, Harness, Helm, NewRelic) and query them through 7 specialist AI agents and 16 MCP tools — no external APIs, no cloud dependencies, zero data leaving your machine.
+A local-first SRE knowledge assistant powered by GitHub Copilot Chat and Claude Agent. Index your infrastructure repos (Terraform, Harness, Helm, NewRelic) and query them through 7 specialist AI agents, 16 MCP tools, and 5 slash-command skills — no external APIs, no cloud dependencies, zero data leaving your machine.
 
 Works with any client — multi-tenant architecture discovers and indexes all configured clients automatically.
+
+> **New to HiveMind?** See the complete [Usage Guide](docs/USAGE_GUIDE.md) for detailed setup instructions, example prompts, and daily workflows.
 
 ---
 
@@ -24,12 +26,13 @@ Works with any client — multi-tenant architecture discovers and indexes all co
   │  MCP Server  │  16 tools: query, search, trace, diff, impact, write
   └──────┬──────┘
          ▼
-  ┌─────────────┐
-  │  Copilot Chat│  7 agents + 14 skills → answers grounded in YOUR infra
-  └─────────────┘
+  ┌─────────────────┐
+  │  Copilot Chat /  │  7 agents + 5 skills → answers grounded in YOUR infra
+  │  Claude Agent    │  (Claude Agent adds parallel subagents + handoffs)
+  └─────────────────┘
 ```
 
-**Key idea:** You ask a question in Copilot Chat. The Team Lead agent routes it to the right specialist. The specialist queries indexed memory using MCP tools and returns an answer grounded in your actual infrastructure — not generic training data.
+**Key idea:** You ask a question in Copilot Chat or Claude Agent. The Team Lead agent routes it to the right specialist. The specialist queries indexed memory using MCP tools and returns an answer grounded in your actual infrastructure — not generic training data. Claude Agent adds parallel subagent investigation for faster incident resolution.
 
 ### Agents
 
@@ -52,6 +55,23 @@ Works with any client — multi-tenant architecture discovers and indexes all co
 | secret-audit | `/secret-audit` | Secret lifecycle audit |
 | postmortem | `/postmortem` | Post-incident review generator |
 | investigation-memory | `/investigation-memory` | Save/recall past investigations |
+
+### Copilot Chat vs Claude Agent
+
+HiveMind works with both GitHub Copilot Chat and Claude Agent in VS Code. Both have full access to all 16 MCP tools and 7 agents.
+
+| Feature | Copilot Chat | Claude Agent |
+|---------|-------------|--------------|
+| HiveMind KB access | Yes | Yes |
+| All 16 MCP tools | Yes | Yes |
+| Sequential agent handoffs | Yes | Yes |
+| Parallel subagent investigation | No | Yes |
+| Handoff chain buttons | No | Yes |
+| /memory command (CLAUDE.md) | No | Yes |
+| Direct file read (local) | No | Yes |
+| Terminal command execution | No | Yes |
+
+**Claude Agent setup:** Enable `github.copilot.chat.claudeAgent.enabled` in VS Code settings, verify `CLAUDE.md` exists at project root, then start a Claude session from the Chat view. See the [Usage Guide](docs/USAGE_GUIDE.md#using-hivemind-with-claude-agent-in-vs-code) for detailed instructions.
 
 ---
 
@@ -82,7 +102,7 @@ Then open VS Code → Copilot Chat → Ask anything about your infrastructure.
 
 ## MCP Tools
 
-All 16 tools are exposed via the MCP server and callable from Copilot Chat.
+All 16 tools are exposed via the MCP server and callable from both Copilot Chat and Claude Agent.
 
 | Tool | Description |
 |------|-------------|
@@ -141,7 +161,7 @@ HiveMind/
 ├── .github/
 │   ├── copilot-instructions.md     # Auto-loaded system prompt
 │   ├── agents/                     # 7 Copilot Enterprise agents
-│   └── skills/                     # 14 skills (9 tool + 5 composite)
+│   └── skills/                     # 5 skills (triage, k8s, secrets, postmortem, investigation-memory)
 ├── clients/                        # Client configurations (gitignored)
 │   ├── _example/repos.yaml         # Template — copy to get started
 │   └── <client>/repos.yaml         # Your client config
@@ -181,9 +201,12 @@ HiveMind/
 │   ├── branch_protection.py        #   Branch protection engine
 │   ├── incremental_sync.py         #   Incremental re-indexing
 │   └── git_utils.py                #   Git operations
-├── tests/                          # Test suite (608+ tests)
+├── tests/                          # Test suite (637+ tests)
 ├── memory/                         # Runtime data (gitignored)
-├── Makefile                        # Build targets (9 commands)
+├── Makefile                        # Build targets
+├── CLAUDE.md                       # Claude Agent configuration
+├── docs/
+│   └── USAGE_GUIDE.md              # Complete usage guide
 └── requirements.txt
 ```
 
@@ -201,9 +224,12 @@ HiveMind/
 | `make chromadb` | Populate ChromaDB vector store (all clients) |
 | `make chromadb CLIENT=xxx` | Populate ChromaDB — one client |
 | `make status` | Show sync status for all repos and branches |
-| `make test` | Run all 608+ tests |
-| `make server` | Start MCP server (Copilot connects to this) |
+| `make test` | Run all 637+ tests |
+| `make server` | Start MCP server (Copilot/Claude connects to this) |
 | `make add-client` | Add a new client interactively |
+| `make docs` | Open the usage guide in VS Code |
+| `make verify` | Run tests + check KB status + verify ChromaDB |
+| `make recall CLIENT=x QUERY=y` | Search past investigations |
 
 ---
 
@@ -212,10 +238,10 @@ HiveMind/
 | Metric | Value |
 |--------|-------|
 | Query time (BM25) | ~350ms |
-| Query time (ChromaDB) | ~50ms |
+| Query time (ChromaDB) | ~370ms |
 | Full crawl | ~2 hours |
 | Incremental sync | ~5 minutes |
-| Test suite | 608+ tests |
+| Test suite | 637+ tests |
 
 ---
 
@@ -246,7 +272,7 @@ Optional (graceful fallbacks exist):
 ## Design Principles
 
 1. **Local-first** — No cloud APIs, no paid services, no telemetry
-2. **Copilot-only AI** — GitHub Copilot Chat is the sole LLM
+2. **Copilot + Claude** — GitHub Copilot Chat and Claude Agent are the AI interfaces
 3. **Multi-tenant** — Any number of clients, dynamically discovered
 4. **Branch-aware** — All queries respect branch context and tier classification
 5. **Branch-protected** — Protected branches require working branch + PR

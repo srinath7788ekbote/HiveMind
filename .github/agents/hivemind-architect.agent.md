@@ -5,7 +5,10 @@ description: >
   AKS clusters, network topology, resource dependencies, naming conventions,
   infra layer chains. Triggers: terraform, infra, layer, AKS, cluster,
   VNet, Azure, Redis, PostgreSQL, AppGateway, KeyVault resource ownership.
-tools: ['query-memory', 'query-graph', 'search-files', 'get-entity', 'diff-branches']
+tools:
+  - read
+  - search
+user-invocable: true
 handoffs:
   - label: "-> Security (RBAC/identity ownership question)"
     agent: hivemind-security
