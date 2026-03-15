@@ -13,11 +13,9 @@ Usage:
 
 import argparse
 import json
-import os
 import re
 import sys
-import threading
-import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -168,9 +166,10 @@ def _get_bm25_index(vectors_dir: Path):
 
 
 # ---------------------------------------------------------------------------
-# ChromaDB client cache (avoids 250ms+ PersistentClient creation per query)
+# ChromaDB caches (avoids 250ms+ PersistentClient creation per query)
 # ---------------------------------------------------------------------------
 _chromadb_clients: dict = {}  # vectors_path -> chromadb.PersistentClient
+_chromadb_collections: dict = {}  # vectors_path -> {col_name: Collection}
 
 
 def query_memory(
@@ -200,68 +199,94 @@ def query_memory(
     # Try ChromaDB first
     try:
         import chromadb
+    except ImportError:
+        chromadb = None
 
+    if chromadb is not None:
         vectors_path = str(mem_dir / "vectors")
         if vectors_path not in _chromadb_clients:
             _chromadb_clients[vectors_path] = chromadb.PersistentClient(path=vectors_path)
         client_db = _chromadb_clients[vectors_path]
-        collections = client_db.list_collections()
 
-        if collections:
-            from ingest.fast_embed import embed_texts, get_chromadb_ef
-
+        # Cache collection objects to avoid repeated get_collection overhead
+        if vectors_path not in _chromadb_collections:
+            from ingest.fast_embed import get_chromadb_ef
             ef = get_chromadb_ef()
+            col_map = {}
+            for col_info in client_db.list_collections():
+                col_name = col_info.name if hasattr(col_info, 'name') else str(col_info)
+                col_map[col_name] = client_db.get_collection(col_name, embedding_function=ef)
+            _chromadb_collections[vectors_path] = col_map
+
+        col_map = _chromadb_collections[vectors_path]
+        col_names = list(col_map.keys())
+
+        # Filter collections by branch name when a branch is specified
+        if branch and col_names:
+            branch_slug = branch.replace("/", "_").replace("-", "_").lower()
+            filtered = [n for n in col_names if branch_slug in n.replace("-", "_").lower()]
+            if filtered:
+                col_names = filtered
+
+        if col_names:
+            from ingest.fast_embed import embed_texts
+
             # Embed the query with the same function used at ingest
             query_embedding = embed_texts([query])[0]
 
-            all_results = []
-            for col_info in collections:
-                col_name = col_info.name if hasattr(col_info, 'name') else str(col_info)
-                collection = client_db.get_collection(col_name, embedding_function=ef)
+            # Build where filter once — skip branch filter when collections
+            # are already branch-specific (avoids redundant metadata scan)
+            where_filter = {}
+            if filter_type:
+                where_filter["file_type"] = filter_type
 
-                # Build where filter
-                where_filter = {}
-                if branch:
-                    where_filter["branch"] = branch
-                if filter_type:
-                    where_filter["file_type"] = filter_type
+            query_args = where_filter if where_filter else None
+            col_objects = [col_map[n] for n in col_names]
 
+            def _query_one(collection):
+                """Query a single pre-fetched collection."""
                 try:
                     results = collection.query(
                         query_embeddings=[query_embedding],
                         n_results=top_k,
-                        where=where_filter if where_filter else None,
+                        where=query_args,
                     )
-
-                    if results and results.get("documents"):
-                        docs = results["documents"][0]
-                        metas = results["metadatas"][0] if results.get("metadatas") else [{}] * len(docs)
-                        distances = results["distances"][0] if results.get("distances") else [0] * len(docs)
-
-                        for doc, meta, dist in zip(docs, metas, distances):
-                            relevance = max(0, 1.0 - dist) * 100
-                            fp = meta.get("file_path", "")
-                            rp = meta.get("repo", "")
-                            br = meta.get("branch", "default")
-                            all_results.append({
-                                "text": doc,
-                                "file_path": fp,
-                                "repo": rp,
-                                "branch": br,
-                                "relevance_pct": round(relevance, 1),
-                                "chunk_index": meta.get("chunk_index", 0),
-                                "file_type": meta.get("file_type", "unknown"),
-                                "source_citation": f"[Source: {fp} | repo: {rp} | branch: {br} | relevance: {round(relevance, 1)}%]",
-                            })
                 except Exception:
-                    continue
+                    return []
+
+                hits = []
+                if results and results.get("documents"):
+                    docs = results["documents"][0]
+                    metas = results["metadatas"][0] if results.get("metadatas") else [{}] * len(docs)
+                    distances = results["distances"][0] if results.get("distances") else [0] * len(docs)
+
+                    for doc, meta, dist in zip(docs, metas, distances):
+                        rel = max(0.0, 1.0 - dist)
+                        fp = meta.get("file_path", "")
+                        rp = meta.get("repo", "")
+                        br = meta.get("branch", "default")
+                        hits.append({
+                            "text": doc,
+                            "file_path": fp,
+                            "repo": rp,
+                            "branch": br,
+                            "relevance": round(rel, 4),
+                            "relevance_pct": round(rel * 100, 1),
+                            "chunk_index": meta.get("chunk_index", 0),
+                            "file_type": meta.get("file_type", "unknown"),
+                            "source_citation": f"[Source: {fp} | repo: {rp} | branch: {br} | relevance: {round(rel * 100, 1)}%]",
+                        })
+                return hits
+
+            # Query all collections in parallel
+            all_results = []
+            with ThreadPoolExecutor(max_workers=min(len(col_objects), 16)) as pool:
+                for hits in pool.map(_query_one, col_objects):
+                    all_results.extend(hits)
 
             # Sort by relevance and return top_k
             all_results.sort(key=lambda r: r["relevance_pct"], reverse=True)
             return all_results[:top_k]
-
-    except (ImportError, Exception):
-        pass
 
     # ------------------------------------------------------------------
     # Fallback: BM25 search over JSON chunks
@@ -305,6 +330,7 @@ def query_memory(
             "file_path": fp,
             "repo": rp,
             "branch": br,
+            "relevance": round(rel_pct / 100, 4),
             "relevance_pct": rel_pct,
             "chunk_index": meta.get("chunk_index", 0),
             "file_type": meta.get("file_type", "unknown"),
