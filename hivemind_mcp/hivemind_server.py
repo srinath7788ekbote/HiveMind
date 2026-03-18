@@ -42,6 +42,8 @@ from tools.diff_branches import diff_branches
 from tools.list_branches import list_branches
 from tools.set_client import set_active_client, get_active_client, list_clients
 from tools.write_file import write_file
+from tools.read_file import read_file
+from tools.propose_edit import propose_edit
 from tools.check_branch import check_branch
 from tools.save_investigation import save_investigation
 from tools.recall_investigation import recall_investigation
@@ -586,6 +588,79 @@ async def hivemind_recall_investigation(
 
 
 @mcp_server.tool()
+async def hivemind_read_file(
+    client: str,
+    repo: str,
+    file_path: str,
+    branch: str = None,
+) -> str:
+    """Read actual file content from a repo.
+
+    Searches the HiveMind KB first for chunk coverage, then reads from
+    disk for complete content.  Use BEFORE proposing any edits — always
+    read before writing.
+
+    Args:
+        client: Client name (e.g. "dfin").
+        repo: Repository name (e.g. "dfin-harness-pipelines").
+        file_path: Path within the repo (e.g. "newad/cd/cd_deploy_env/pipeline.yaml").
+        branch: Optional branch to read from (uses git show).
+    """
+    try:
+        result = await _run_with_timeout(
+            read_file,
+            client=client,
+            repo=repo,
+            file_path=file_path,
+            branch=branch,
+        )
+        return _format_result(result)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp_server.tool()
+async def hivemind_propose_edit(
+    client: str,
+    repo: str,
+    file_path: str,
+    branch: str,
+    description: str,
+    proposed_changes: str,
+    auto_apply: bool = False,
+) -> str:
+    """Propose or apply an edit to a file in a repo.
+
+    Auto-applies to non-protected branches (never commits or pushes).
+    Always reads the file first and shows a diff preview.
+    NEVER use on main/release/hotfix branches.
+
+    Args:
+        client: Client name (e.g. "dfin").
+        repo: Repository name.
+        file_path: Path within the repo.
+        branch: Target branch for the edit.
+        description: Human-readable description of the edit.
+        proposed_changes: The new file content (full replacement).
+        auto_apply: If True and branch is safe, write to disk (default False).
+    """
+    try:
+        result = await _run_with_timeout(
+            propose_edit,
+            client=client,
+            repo=repo,
+            file_path=file_path,
+            branch=branch,
+            description=description,
+            proposed_changes=proposed_changes,
+            auto_apply=auto_apply,
+        )
+        return _format_result(result)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp_server.tool()
 async def hivemind_check_branch(
     client: str,
     repo: str,
@@ -672,6 +747,8 @@ TOOL_REGISTRY = {
     "hivemind_write_file": hivemind_write_file,
     "hivemind_get_active_client": hivemind_get_active_client,
     "hivemind_get_active_branch": hivemind_get_active_branch,
+    "hivemind_read_file": hivemind_read_file,
+    "hivemind_propose_edit": hivemind_propose_edit,
     "hivemind_check_branch": hivemind_check_branch,
     "hivemind_save_investigation": hivemind_save_investigation,
     "hivemind_recall_investigation": hivemind_recall_investigation,
@@ -701,9 +778,9 @@ def run_self_test() -> bool:
     # Verify the FastMCP server has them registered
     registered_count = len(expected_tools)
     print()
-    print(f"Tools registered: {registered_count}/16")
+    print(f"Tools registered: {registered_count}/18")
 
-    if registered_count == 16 and all_ok:
+    if registered_count == 18 and all_ok:
         print("All tools healthy.")
         return True
     else:

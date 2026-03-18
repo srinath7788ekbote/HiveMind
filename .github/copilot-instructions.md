@@ -278,6 +278,8 @@ Copilot can call these tools directly — no extension, slash commands, or parti
 | `hivemind_check_branch` | **Pre-flight check** — verify branch is indexed / exists on remote |
 | `hivemind_save_investigation` | Save a completed investigation to memory — use ONLY when user explicitly asks to save |
 | `hivemind_recall_investigation` | Search past saved investigations for similar incidents |
+| `hivemind_read_file` | Read actual file content from a repo — KB lookup + disk read |
+| `hivemind_propose_edit` | Propose or apply an edit with diff preview and branch protection |
 
 ### Tool Calling Workflow
 
@@ -297,42 +299,115 @@ Copilot can call these tools directly — no extension, slash commands, or parti
 | "Where is secret X used?" | `hivemind_get_secret_flow` | `hivemind_query_memory` |
 | "What changed between branches?" | `hivemind_check_branch` | `hivemind_diff_branches` then `hivemind_query_memory` |
 | "Find all X files" | `hivemind_search_files` | `hivemind_query_memory` |
-| "Create/update a file" | `hivemind_search_files` (read first) | `hivemind_write_file` |
+| "Create/update a file" | `hivemind_read_file` (read first) | `hivemind_propose_edit` or `hivemind_write_file` |
+| "Read a file" | `hivemind_read_file` | (none — returns KB + disk content) |
 | "Have we seen this before?" | `hivemind_recall_investigation` | `hivemind_query_memory` |
 | "Save this investigation" | `hivemind_save_investigation` | (none) |
 
 ---
 
-## 6. Response Format Template
+## 6. Response Format — Verbose Agent Output
 
-Every response MUST follow this format:
+Every HiveMind response MUST show full agent activity.
+Never give a one-line summary. Always show the full investigation trail.
+
+### MANDATORY OUTPUT STRUCTURE:
 
 ```
-{Agent Name}
-  📋 Finding: {what was found}
-  📁 Sources:
-    - `{file/path1.yaml}` [repo: {repo}, branch: {branch}]
-    - `{file/path2.tf}` [repo: {repo}, branch: {branch}]
-  -> Consulting {Other Agent} about {reason}...  (if applicable)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🧠 HIVEMIND INVESTIGATION REPORT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-{Other Agent} (consulted by {Agent Name})
-  📋 Finding: {what was found}
-  📁 Sources:
-    - `{file/path3.yaml}` [repo: {repo}, branch: {branch}]
-
-Answer
-  {synthesized answer combining all agent findings}
+**Active Client:** <client> | **Branch:** <branch>
 
 ---
-## All Sources
-| Agent | File | Repo | Branch |
-|-------|------|------|--------|
-| {agent-name} | {file/path1.yaml} | {repo} | {branch} |
-| {agent-name} | {file/path2.tf} | {repo} | {branch} |
-| {other-agent} | {file/path3.yaml} | {repo} | {branch} |
 
-Confidence: {HIGH|MEDIUM|LOW}
+### 🎯 TEAM LEAD — Task Understanding
+**Request interpreted as:** <what the user asked for>
+**Investigation type:** [Investigation | Edit | Analysis | Query]
+**Agents activated:** <list of agents used>
+
+**Initial KB queries run:**
+| Query | Results Found | Top File |
+|-------|--------------|----------|
+| query_memory("...") | X chunks | path/to/file.yaml [repo, branch] |
+| get_entity("...") | found/not found | - |
+
+---
+
+### ⚙️ <AGENT NAME> — <What This Agent Did>
+**Role:** <why this agent was chosen>
+
+**Tools called:**
+| Tool | Input | Output Summary |
+|------|-------|----------------|
+| hivemind_read_file | repo/path.yaml | 2957 lines read from disk |
+| hivemind_query_memory | "parser stages" | 3 files found |
+| hivemind_impact_analysis | service-name | 12 services affected |
+
+**Findings:**
+- <specific finding 1 with file citation>
+- <specific finding 2 with file citation>
+- <specific finding 3 with file citation>
+
+**Confidence:** HIGH / MEDIUM / LOW
+**Reason:** <why this confidence level>
+
+---
+
+### ⚙️ <SECOND AGENT NAME> — <What This Agent Did>
+[same structure if second agent was used]
+
+---
+
+### 📝 PROPOSED CHANGES (if edit requested)
+**File:** `<path>` | **Repo:** `<repo>` | **Branch:** `<branch>`
+**What changes:** <description>
+**Why this pattern:** <which existing file this pattern was learned from>
+**Lines:** +<added> / -<removed>
+(first 30 lines of diff shown here)
+
+**To apply:** Confirm and HiveMind will write to branch
+**To modify:** Tell me what to change
+**Impact:** <what this change affects>
+
+---
+
+### 🔍 ROOT CAUSE / ANSWER
+<The actual answer — specific, cited, actionable>
+
+**Confidence:** HIGH / MEDIUM / LOW
+
+---
+
+### 📁 ALL SOURCES
+| File | Repo | Branch | Why Referenced |
+|------|------|--------|----------------|
+| path/to/file.yaml | repo-name | branch | startup probe config |
+
+---
+
+### ⏱️ INVESTIGATION SUMMARY
+| Agent | Tools Used | Files Read | Time |
+|-------|-----------|-----------|------|
+| team-lead | 3 tools | 0 files | - |
+| devops | 4 tools | 2 files | - |
+
+**Total:** X tools called, Y files read, Z KB chunks searched
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
+
+### RULES FOR VERBOSE OUTPUT:
+- NEVER summarize with just "I found X and did Y"
+- ALWAYS show every tool call made
+- ALWAYS show which agent did what
+- ALWAYS show confidence level with reasoning
+- ALWAYS show diff preview when proposing edits
+- ALWAYS show the sources table
+- ALWAYS show investigation summary at the end
+- If no KB results: explicitly say "NOT IN KNOWLEDGE BASE" and list what was searched
+- If multiple agents: show each agent's section separately
 
 ### Query Examples
 
@@ -349,6 +424,8 @@ Instead of slash commands, call the MCP tools directly:
 | Parse a pipeline | `hivemind_get_pipeline(client="dfin", name="deploy_audit")` |
 | Save investigation | `hivemind_save_investigation(client="dfin", service_name="audit-service", incident_type="CrashLoopBackOff", root_cause_summary="...", resolution="...", files_cited="[]", tags="spring-boot,aks")` |
 | Recall past incidents | `hivemind_recall_investigation(client="dfin", query="OOMKilled spring-boot")` |
+| Read a file from repo | `hivemind_read_file(client="dfin", repo="dfin-harness-pipelines", file_path="newad/cd/cd_deploy_env/pipeline.yaml")` |
+| Propose an edit | `hivemind_propose_edit(client="dfin", repo="dfin-harness-pipelines", file_path="...", branch="feat/x", description="...", proposed_changes="...", auto_apply=False)` |
 
 ---
 
