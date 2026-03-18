@@ -7,3 +7,5 @@ mcp>=1.0
 psutil>=5.9
 pytest>=8.0
 rank_bm25>=0.2
+python-hcl2python-hcl2>=4.0
+ruamel.yaml>=0.18

@@ -469,10 +469,10 @@ class TestMCPRegistrationNewTools(unittest.TestCase):
         from hivemind_mcp.hivemind_server import TOOL_REGISTRY
         self.assertIn("hivemind_propose_edit", TOOL_REGISTRY)
 
-    def test_total_tool_count_is_18(self):
-        """TOOL_REGISTRY now contains exactly 18 tools."""
+    def test_total_tool_count_is_20(self):
+        """TOOL_REGISTRY now contains exactly 20 tools."""
         from hivemind_mcp.hivemind_server import TOOL_REGISTRY
-        self.assertEqual(len(TOOL_REGISTRY), 18)
+        self.assertEqual(len(TOOL_REGISTRY), 20)
 
     def test_new_tools_are_callable(self):
         """Both new tools are callable async functions."""

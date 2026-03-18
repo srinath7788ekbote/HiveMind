@@ -1,3 +1,16 @@
+# ============================================
+# HIVEMIND GITIGNORE — PROTECTION MODEL
+# ============================================
+# NEVER committed (client sensitive):
+#   clients/<name>/  → repo paths, credentials
+#   memory/<name>/   → KB data, vectors, SQLite DBs
+#                       investigations, profiles, indexes
+# SAFE to commit (framework only):
+#   clients/_example/ → template for new clients
+#   memory/README.md  → documentation
+#   All Python source, tests, docs, Makefile
+# ============================================
+
 # Python
 __pycache__/
 *.py[cod]
@@ -24,6 +37,32 @@ memory/*
 !memory/README.md
 
 *.db
+*.sqlite
+*.sqlite3
+
+# ============================================
+# HTI (HiveMind Tree Intelligence)
+# ============================================
+hivemind_mcp/hti/__pycache__/
+
+# ============================================
+# Sync state and logs (client-specific, sensitive)
+# ============================================
+memory/*/sync_state.json
+memory/*/sync_log.txt
+
+# ============================================
+# Investigation memory (client incident data)
+# ============================================
+memory/*/investigations/
+
+# ============================================
+# Environment and local config
+# ============================================
+.env
+.env.*
+*.local
+CLAUDE.local.md
 
 # ============================================
 # VS Code extension build artifacts (legacy)

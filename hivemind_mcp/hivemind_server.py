@@ -48,6 +48,9 @@ from tools.check_branch import check_branch
 from tools.save_investigation import save_investigation
 from tools.recall_investigation import recall_investigation
 
+# HTI (Tree Intelligence) imports
+from hivemind_mcp.hti.utils import get_hti_connection
+
 # ---------------------------------------------------------------------------
 # ChromaDB availability check (printed once at import time)
 # ---------------------------------------------------------------------------
@@ -730,8 +733,204 @@ async def hivemind_get_active_branch() -> str:
         return json.dumps({"error": str(e)})
 
 
-# ---------------------------------------------------------------------------
-# Registry of all tool functions for validation
+@mcp_server.tool()
+async def hivemind_hti_get_skeleton(
+    client: str,
+    repo: str = "all",
+    file_type: str = "all",
+    file_path: str = None,
+    branch: str = None,
+    max_skeletons: int = 50,
+) -> str:
+    """Get the structural skeleton of YAML/HCL infrastructure files
+    for reasoning-based retrieval. Returns a compact JSON tree showing file
+    structure (keys, paths, metadata) without full values. Use this when you
+    need to find specific structural elements like pipeline stages, Terraform
+    modules, Helm values, or approval gates. After receiving the skeleton,
+    identify the node_paths that likely contain the answer, then call
+    hivemind_hti_fetch_nodes to get the full content.
+
+    Args:
+        client: Client name (e.g. "dfin"). Call get_active_client to find this.
+        repo: Repository name, or "all" for all repos (default "all").
+        file_type: Filter by type: "harness", "terraform", "helm", "generic", or "all".
+        file_path: Optional specific file path to look up.
+        branch: Optional branch filter.
+        max_skeletons: Maximum number of skeleton files to return (default 50).
+    """
+    try:
+        def _get_skeletons():
+            conn = get_hti_connection(client)
+            cursor = conn.cursor()
+
+            query = "SELECT id, file_path, repo, branch, file_type, node_count, skeleton_json FROM hti_skeletons WHERE client = ?"
+            params = [client]
+
+            if repo != "all":
+                query += " AND repo = ?"
+                params.append(repo)
+
+            if file_type != "all":
+                query += " AND file_type = ?"
+                params.append(file_type)
+
+            if file_path:
+                query += " AND file_path LIKE ?"
+                params.append(f"%{file_path}%")
+
+            if branch:
+                query += " AND branch = ?"
+                params.append(branch)
+
+            query += " ORDER BY indexed_at DESC LIMIT ?"
+            params.append(max_skeletons)
+
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+            # Get total count for this filter
+            count_query = "SELECT COUNT(*) FROM hti_skeletons WHERE client = ?"
+            count_params = [client]
+            if repo != "all":
+                count_query += " AND repo = ?"
+                count_params.append(repo)
+            if file_type != "all":
+                count_query += " AND file_type = ?"
+                count_params.append(file_type)
+            if file_path:
+                count_query += " AND file_path LIKE ?"
+                count_params.append(f"%{file_path}%")
+            if branch:
+                count_query += " AND branch = ?"
+                count_params.append(branch)
+
+            cursor.execute(count_query, count_params)
+            total = cursor.fetchone()[0]
+
+            conn.close()
+
+            skeletons = []
+            for row in rows:
+                skeletons.append({
+                    "skeleton_id": row[0],
+                    "file_path": row[1],
+                    "repo": row[2],
+                    "branch": row[3],
+                    "file_type": row[4],
+                    "node_count": row[5],
+                    "skeleton": json.loads(row[6]),
+                })
+
+            return {
+                "skeletons": skeletons,
+                "total_found": total,
+                "returned": len(skeletons),
+                "usage_hint": "Identify node_paths from the skeletons above, then call hivemind_hti_fetch_nodes",
+            }
+
+        result = await _run_with_timeout(_get_skeletons)
+        return _format_result(result)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp_server.tool()
+async def hivemind_hti_fetch_nodes(
+    skeleton_id: str,
+    node_paths: str,
+) -> str:
+    """Fetch full content of specific nodes from YAML/HCL files by
+    node path. Call this after hivemind_hti_get_skeleton — provide the
+    node_paths you identified from the skeleton. Returns complete subtree
+    content at each path with full values, ready to answer the original query.
+
+    Args:
+        skeleton_id: Skeleton ID from hivemind_hti_get_skeleton result.
+        node_paths: Comma-separated list of node paths to fetch,
+                    e.g. "root.pipeline.stages[2],root.pipeline.variables".
+    """
+    try:
+        def _fetch_nodes():
+            # Parse skeleton_id to get client
+            parts = skeleton_id.split(":", 3)
+            if len(parts) < 4:
+                return {"error": f"Invalid skeleton_id format: {skeleton_id}"}
+
+            client = parts[0]
+            conn = get_hti_connection(client)
+            cursor = conn.cursor()
+
+            # Get skeleton metadata
+            cursor.execute(
+                "SELECT file_path, repo, branch FROM hti_skeletons WHERE id = ?",
+                (skeleton_id,),
+            )
+            skel_row = cursor.fetchone()
+            if not skel_row:
+                conn.close()
+                return {"error": f"Skeleton not found: {skeleton_id}"}
+
+            file_path, repo, branch = skel_row
+
+            # Parse requested paths
+            requested = [p.strip() for p in node_paths.split(",") if p.strip()]
+
+            found_nodes = []
+            missing_paths = []
+
+            for req_path in requested:
+                cursor.execute(
+                    "SELECT node_path, depth, content_json FROM hti_nodes WHERE skeleton_id = ? AND node_path = ?",
+                    (skeleton_id, req_path),
+                )
+                row = cursor.fetchone()
+                if row:
+                    found_nodes.append({
+                        "node_path": row[0],
+                        "depth": row[1],
+                        "content": json.loads(row[2]),
+                        "found": True,
+                    })
+                else:
+                    # Try prefix match for partial paths
+                    cursor.execute(
+                        "SELECT node_path, depth, content_json FROM hti_nodes WHERE skeleton_id = ? AND node_path LIKE ? ORDER BY depth LIMIT 1",
+                        (skeleton_id, f"{req_path}%"),
+                    )
+                    prefix_row = cursor.fetchone()
+                    if prefix_row:
+                        found_nodes.append({
+                            "node_path": prefix_row[0],
+                            "depth": prefix_row[1],
+                            "content": json.loads(prefix_row[2]),
+                            "found": True,
+                            "matched_via": "prefix",
+                        })
+                    else:
+                        missing_paths.append(req_path)
+                        found_nodes.append({
+                            "node_path": req_path,
+                            "depth": -1,
+                            "content": None,
+                            "found": False,
+                        })
+
+            conn.close()
+
+            return {
+                "file_path": file_path,
+                "repo": repo,
+                "branch": branch,
+                "nodes": found_nodes,
+                "missing_paths": missing_paths,
+            }
+
+        result = await _run_with_timeout(_fetch_nodes)
+        return _format_result(result)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
 # ---------------------------------------------------------------------------
 TOOL_REGISTRY = {
     "hivemind_query_memory": hivemind_query_memory,
@@ -752,6 +951,8 @@ TOOL_REGISTRY = {
     "hivemind_check_branch": hivemind_check_branch,
     "hivemind_save_investigation": hivemind_save_investigation,
     "hivemind_recall_investigation": hivemind_recall_investigation,
+    "hivemind_hti_get_skeleton": hivemind_hti_get_skeleton,
+    "hivemind_hti_fetch_nodes": hivemind_hti_fetch_nodes,
 }
 
 
@@ -778,9 +979,9 @@ def run_self_test() -> bool:
     # Verify the FastMCP server has them registered
     registered_count = len(expected_tools)
     print()
-    print(f"Tools registered: {registered_count}/18")
+    print(f"Tools registered: {registered_count}/20")
 
-    if registered_count == 18 and all_ok:
+    if registered_count == 20 and all_ok:
         print("All tools healthy.")
         return True
     else:

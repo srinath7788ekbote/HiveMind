@@ -280,6 +280,8 @@ Copilot can call these tools directly — no extension, slash commands, or parti
 | `hivemind_recall_investigation` | Search past saved investigations for similar incidents |
 | `hivemind_read_file` | Read actual file content from a repo — KB lookup + disk read |
 | `hivemind_propose_edit` | Propose or apply an edit with diff preview and branch protection |
+| `hivemind_hti_get_skeleton` | Get structural skeleton of YAML/HCL files (keys + paths, no values) |
+| `hivemind_hti_fetch_nodes` | Fetch full node content by exact path from a skeleton |
 
 ### Tool Calling Workflow
 
@@ -303,6 +305,55 @@ Copilot can call these tools directly — no extension, slash commands, or parti
 | "Read a file" | `hivemind_read_file` | (none — returns KB + disk content) |
 | "Have we seen this before?" | `hivemind_recall_investigation` | `hivemind_query_memory` |
 | "Save this investigation" | `hivemind_save_investigation` | (none) |
+| "What are the stages in X?" | `hivemind_hti_get_skeleton` | `hivemind_hti_fetch_nodes` (targeted node paths) |
+| "Show the config for X" | `hivemind_hti_get_skeleton` | `hivemind_hti_fetch_nodes` (targeted node paths) |
+
+### HTI vs KB Search — When to Use Which
+
+#### Use `hivemind_hti_get_skeleton` + `hivemind_hti_fetch_nodes` when:
+
+Query involves **structural navigation** of a specific file:
+- "What are the steps in the Deploy stage of [pipeline]?"
+- "What Terraform variables are defined in [module]?"
+- "Show the rollback configuration for [service]"
+- "What Helm values are overridden for [environment]?"
+- "Show all approval gates in [pipeline]"
+- "What is the exact spec of stage [X] in [pipeline]?"
+- Any query with: "show me", "what is the config", "exact steps", "which stages", "what variables", "show the spec"
+
+#### HTI Retrieval Flow (ALWAYS follow this sequence):
+
+```
+Step 1: Call hivemind_hti_get_skeleton with relevant repo/file_type/file_path
+Step 2: Examine the skeleton — identify which node_paths contain the answer
+Step 3: Call hivemind_hti_fetch_nodes with those node_paths
+Step 4: Answer from the full node content with path citations
+```
+
+**NEVER** skip Step 1 and go straight to `fetch_nodes`.
+**NEVER** guess `node_paths` — always derive them from the skeleton.
+
+#### Use `hivemind_query_memory` when:
+
+Query involves **broad search** across many files:
+- "Which services use KeyVault?"
+- "Find all services with liveness probe config"
+- "Show me anything about nginx ingress"
+- "Which pipelines reference connector X?"
+- Any query that needs to search across all repos/files
+
+#### Use BOTH when:
+
+Query needs broad search + structural precision:
+1. `hivemind_query_memory` to find **which files** are relevant
+2. `hivemind_hti_get_skeleton` on those specific files
+3. `hivemind_hti_fetch_nodes` for exact content
+
+Example: "What are the exact deploy steps for all services that use blue-green?"
+1. `query_memory("blue-green deployment")` → finds 5 pipeline files
+2. `hti_get_skeleton` for each of those 5 files
+3. `hti_fetch_nodes` on deploy stage paths in each
+4. Answer with exact steps from each pipeline
 
 ---
 
@@ -344,6 +395,15 @@ Never give a one-line summary. Always show the full investigation trail.
 | hivemind_read_file | repo/path.yaml | 2957 lines read from disk |
 | hivemind_query_memory | "parser stages" | 3 files found |
 | hivemind_impact_analysis | service-name | 12 services affected |
+| hivemind_hti_get_skeleton | repo/file.yaml | skeleton_id: X, 15 nodes |
+| hivemind_hti_fetch_nodes | skeleton_id, node_paths | 3 nodes fetched |
+
+**If HTI tools were used, also show:**
+| Field | Value |
+|-------|-------|
+| skeleton_id | `<skeleton_id from get_skeleton>` |
+| node_paths identified | `<comma-separated paths from skeleton>` |
+| nodes fetched | `<exact path of each fetched node>` |
 
 **Findings:**
 - <specific finding 1 with file citation>
@@ -500,6 +560,11 @@ STEP 2 — SIGNAL EXTRACTION
     • secrets_refs  — any Key Vault, secret, or config map references
     • image_refs    — container image names and tags
     • timestamps    — time range of the incident
+
+STEP 2b — STRUCTURAL ROUTING (if applicable)
+  IF the query is structural (asks about specific stages, configs, variables, steps, specs):
+    Call hivemind_hti_get_skeleton BEFORE or INSTEAD OF query_memory
+    Then call hivemind_hti_fetch_nodes on the relevant node_paths
 
 STEP 3 — KB SEARCH
   Call hivemind_query_memory(client=<client>, query="<service_name> <error_type>")

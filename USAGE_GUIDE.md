@@ -2,7 +2,9 @@
 
 ## Overview
 
-HiveMind is a local-first SRE knowledge assistant that indexes your infrastructure repos (Terraform, Harness pipelines, Helm charts, Kubernetes secrets) into a searchable knowledge base and exposes them through 16 MCP tools, 7 specialist AI agents, and 10 slash-command skills — all inside VS Code. You ask questions in natural language, and HiveMind answers using your actual infrastructure data with file-path citations.
+HiveMind is a local-first SRE knowledge assistant that indexes your infrastructure repos (Terraform, Harness pipelines, Helm charts, Kubernetes secrets) into a searchable knowledge base and exposes them through 20 MCP tools, 7 specialist AI agents, and 17 slash-command skills — all inside VS Code. You ask questions in natural language, and HiveMind answers using your actual infrastructure data with file-path citations.
+
+HiveMind uses a dual retrieval system: ChromaDB/BM25 for broad semantic search, and HTI (HiveMind Tree Intelligence) for precise structural navigation of YAML/HCL files.
 
 ```
   You paste logs / ask a question
@@ -14,13 +16,14 @@ HiveMind is a local-first SRE knowledge assistant that indexes your infrastructu
   └────────┬─────────┘
            ▼
   ┌──────────────────┐
-  │  HiveMind MCP    │  16 tools: query, search, trace,
-  │  Server           │  diff, impact, graph, write...
+  │  HiveMind MCP    │  20 tools: query, search, trace,
+  │  Server           │  diff, impact, graph, HTI, write...
   └────────┬─────────┘
            ▼
   ┌──────────────────┐
   │  Knowledge Base   │  JSON chunks + SQLite graph
   │  + ChromaDB       │  + ChromaDB vectors
+  │  + HTI SQLite     │  + Structural skeletons/nodes
   └────────┬─────────┘
            ▼
   Answer with file-path citations from YOUR infra
@@ -78,7 +81,7 @@ The interactive wizard asks for:
 make crawl CLIENT=<your-client>
 ```
 
-This crawls all repos, classifies files, extracts relationships, and builds the knowledge base. Takes ~2 hours for large codebases.
+This crawls all repos, classifies files, extracts relationships, builds the knowledge base, and automatically indexes HTI. Takes ~2 hours for large codebases.
 
 ### 5. Populate ChromaDB (optional but recommended)
 
@@ -88,7 +91,17 @@ make chromadb CLIENT=<your-client>
 
 Populates the ChromaDB vector store for semantic search. Takes ~3 hours. Without this, HiveMind falls back to BM25 keyword search, which is still accurate.
 
-### 6. Start the MCP server
+### 6. Set up HTI (structural search)
+
+```bash
+make hti-setup CLIENT=<your-client>
+```
+
+Sets up HTI (HiveMind Tree Intelligence) for precise structural navigation of YAML/HCL files. This runs migration (creates `hti_skeletons` and `hti_nodes` tables) then indexes all repos. Takes ~5 minutes.
+
+> **Note:** If you ran `make crawl`, HTI indexing already happened automatically. `make hti-setup` is only needed if you skipped the crawl or want to ensure HTI schema is set up.
+
+### 7. Start the MCP server
 
 ```bash
 make server
@@ -96,7 +109,7 @@ make server
 
 Keep this running while using HiveMind. Copilot Chat and Claude Agent connect to it automatically.
 
-### 7. VS Code setup
+### 8. VS Code setup
 
 - Open VS Code in the HiveMind project folder
 - Verify `.vscode/mcp.json` exists (it should — it's checked into the repo)
@@ -383,7 +396,7 @@ Same `@` syntax works:
 
 ---
 
-## All 16 MCP Tools Reference
+## All 20 MCP Tools Reference
 
 All tools are exposed via the HiveMind MCP server and callable from both Copilot Chat and Claude Agent.
 
@@ -403,8 +416,75 @@ All tools are exposed via the HiveMind MCP server and callable from both Copilot
 | `hivemind_check_branch` | Validate a branch is indexed / exists on remote | "Is release_26_4 indexed?" |
 | `hivemind_set_client` | Switch active client context | "Switch to client2" |
 | `hivemind_write_file` | Write file with branch protection enforcement | "Create a fix on the working branch" |
+| `hivemind_read_file` | Read actual file content from a repo | "Show me the full pipeline YAML" |
+| `hivemind_propose_edit` | Propose or apply an edit to a file | "Change the replica count to 3" |
 | `hivemind_save_investigation` | Save investigation to memory for future recall | "Save this investigation" |
 | `hivemind_recall_investigation` | Search past saved investigations | "Have we seen this before?" |
+| `hivemind_hti_get_skeleton` | Get YAML/HCL file skeleton for structural navigation | "Show me the structure of the deploy pipeline" |
+| `hivemind_hti_fetch_nodes` | Fetch full content at specific node paths | "Get the Deploy stage steps" |
+
+---
+
+## HTI — Structural Navigation (Tools #19 and #20)
+
+HTI (HiveMind Tree Intelligence) is HiveMind's precision retrieval system for navigating YAML and HCL infrastructure files by structure, not by keyword similarity.
+
+### When to use HTI vs query_memory
+
+| Use HTI when... | Use query_memory when... |
+|----------------|------------------------|
+| "What are the steps in the Deploy stage?" | "Which services use KeyVault?" |
+| "What Terraform variables are in prod module?" | "Find all liveness probe configs" |
+| "Show the rollback config for presentation-service" | "Which pipelines reference connector X?" |
+| "What Helm values override staging vs production?" | "Find anything about nginx" |
+| Specific structural element in a known file | Search across all repos |
+
+### How HTI works (what Copilot/Claude does automatically)
+
+When you ask a structural question, Copilot/Claude:
+
+1. Calls `hivemind_hti_get_skeleton` → gets the file's structure (keys + paths)
+2. Reasons over the skeleton: "Deploy stage is at `root.pipeline.stages[3]`"
+3. Calls `hivemind_hti_fetch_nodes` → gets exact content at that path
+4. Answers with complete, path-annotated content
+
+You don't need to invoke HTI explicitly — just ask structural questions.
+
+### Example HTI queries that work well
+
+- "What are all the steps in the Deploy stage of cd_deploy_env?"
+- "Show me all approval gates in the presentation-service pipeline"
+- "What Terraform variables are defined in Eastwood layer 5?"
+- "What resource limits are set for tagging-service in Helm?"
+- "Show the versioning stage configuration for newAd pipelines"
+- "What environment variables does presentation-service inject?"
+
+### HTI Setup (for new clients)
+
+After crawling a new client, also set up HTI:
+
+```bash
+make hti-setup CLIENT=<client>
+```
+
+This runs migration (creates `hti_skeletons` and `hti_nodes` tables) then indexes all repos (3,369 files = ~140K nodes for dfin).
+
+### Keeping HTI updated
+
+HTI updates automatically when you run:
+- `make sync` → syncs KB and HTI together (incremental, fast)
+- `make crawl` → full crawl also re-indexes HTI
+
+HTI uses mtime-based incremental indexing — only re-indexes changed files. A typical daily sync updates HTI in < 30 seconds.
+
+### HTI index status
+
+Check what's indexed:
+
+```bash
+make hti-status
+make hti-status CLIENT=dfin
+```
 
 ---
 
@@ -419,6 +499,7 @@ make sync
 - Runs automatically at 7am daily via Task Scheduler (using `scripts/sync_kb_scheduled.bat`)
 - Shows which repos have changes
 - Re-indexes only changed files (~2-5 minutes)
+- **Automatically updates HTI index** (incremental, < 30 seconds for unchanged files)
 
 ### Before investigating an incident
 
@@ -453,15 +534,17 @@ Sync detects new branches on remote and asks if you want to add them. Answer `y`
 
 ### When to run what
 
-| Situation | Command | Time |
-|-----------|---------|------|
-| Daily changes | `make sync` | ~2-5 min |
-| New release branch | `make sync` (auto-detects) | ~30 min |
-| New repo added | `make add-client` | ~2 hours |
-| Full re-index | `make crawl CLIENT=x` | ~2 hours |
-| Full re-index (all clients) | `make crawl-all` | ~2 hours per client |
-| Populate ChromaDB | `make chromadb CLIENT=x` | ~3 hours |
-| Check KB status | `make status` | instant |
+| Situation | Command | KB updated | HTI updated | Time |
+|-----------|---------|:----------:|:-----------:|------|
+| Daily changes | `make sync` | Yes | Yes (auto) | ~2-5 min |
+| New release branch | `make sync` (auto-detects) | Yes | Yes (auto) | ~30 min |
+| New repo added | `make add-client` → `make crawl` | Yes | Yes (auto) | ~2 hours |
+| Full re-index | `make crawl CLIENT=x` | Yes | Yes (auto) | ~2 hours |
+| Full re-index (all clients) | `make crawl-all` | Yes | Yes (auto) | ~2 hours per client |
+| Populate ChromaDB | `make chromadb CLIENT=x` | - | - | ~3 hours |
+| HTI only | `make hti-index CLIENT=x` | No | Yes | ~5 min |
+| Check KB status | `make status` | - | - | instant |
+| Check HTI status | `make hti-status` | - | - | instant |
 
 ### ChromaDB vs BM25
 
@@ -510,6 +593,12 @@ Run `make chromadb CLIENT=x` once to populate ChromaDB from existing JSON data. 
 2. Check VS Code setting: `github.copilot.chat.claudeAgent.enabled = true`
 3. Restart VS Code and start a fresh Claude session
 
+### HTI not returning results
+
+1. Run `make hti-status CLIENT=<client>` to check if HTI is indexed
+2. If not indexed: `make hti-setup CLIENT=<client>`
+3. If indexed but stale: `make hti-index CLIENT=<client> FORCE=true`
+
 ### `ModuleNotFoundError`
 
 Run `make setup` to install dependencies into the virtual environment.
@@ -547,23 +636,53 @@ Use Python 3.12 or 3.13 — ChromaDB does not support Python 3.14+.
 /get-entity <entity-name>     Full entity profile lookup
 ```
 
+### All 20 MCP Tools
+
+```
+hivemind_get_active_client     Get current client context
+hivemind_get_active_branch     Get current branch context
+hivemind_query_memory          Semantic search (BM25/ChromaDB)
+hivemind_query_graph           Entity relationship graph traversal
+hivemind_get_entity            Entity lookup by name
+hivemind_search_files          File search by name/type/repo
+hivemind_get_pipeline          Harness pipeline deep parse
+hivemind_get_secret_flow       Secret lifecycle trace
+hivemind_impact_analysis       Blast radius assessment
+hivemind_diff_branches         Branch diff comparison
+hivemind_list_branches         Branch listing with tiers
+hivemind_check_branch          Branch validation
+hivemind_set_client            Switch client context
+hivemind_write_file            Write file (branch-protected)
+hivemind_read_file             Read file content from repo
+hivemind_propose_edit          Propose/apply file edits
+hivemind_save_investigation    Save investigation to memory
+hivemind_recall_investigation  Search past investigations
+hivemind_hti_get_skeleton      Get YAML/HCL file skeleton (structural)
+hivemind_hti_fetch_nodes       Fetch content at specific node paths
+```
+
 ### Make Commands Cheat Sheet
 
 ```
 make setup              First-time setup (venv + deps)
 make add-client         Add a new client (interactive wizard)
-make crawl CLIENT=x     Index a single client (~2 hours)
+make crawl CLIENT=x     Index a single client (~2 hours) + HTI
 make chromadb CLIENT=x  Populate ChromaDB (~3 hours, optional)
 make chromadb-all       Populate ChromaDB for all clients
 make server             Start MCP server (keep running)
 make start              Start HiveMind background watcher daemon
 make stop               Stop HiveMind background watcher daemon
-make sync               Daily sync — updates changed files (~5 min)
+make sync               Daily sync — updates KB + HTI (~5 min)
 make status             Check what's indexed (instant)
 make test               Run test suite
-make verify             Run tests + KB status + ChromaDB check
-make crawl-all          Re-index all clients (slow)
+make verify             Run tests + KB status + ChromaDB + HTI check
+make crawl-all          Re-index all clients (slow) + HTI
 make recall CLIENT=x QUERY=y  Search past investigations
+make hti-setup CLIENT=x Full HTI setup (migrate + index)
+make hti-index CLIENT=x Index repos into HTI structural DB
+make hti-index          Index all clients into HTI
+make hti-status         Show HTI index status
+make hti-migrate CLIENT=x Run HTI schema migration
 ```
 
 ### When to Use Copilot Chat vs Claude Agent
@@ -571,7 +690,7 @@ make recall CLIENT=x QUERY=y  Search past investigations
 | Feature | Copilot Chat | Claude Agent |
 |---------|-------------|--------------|
 | HiveMind KB access | Yes | Yes |
-| All 16 MCP tools | Yes | Yes |
+| All 20 MCP tools | Yes | Yes |
 | Slash commands (/triage, /k8s, etc.) | Yes | Yes |
 | Sequential agent handoffs | Yes | Yes |
 | Parallel subagent investigation | No | Yes |

@@ -4,6 +4,7 @@
 .DEFAULT_GOAL := help
 
 CLIENT ?=
+FORCE ?=
 
 # ── help ──────────────────────────────────────────────────
 help:
@@ -34,12 +35,22 @@ help:
 	@echo    make recall             Search past investigations
 	@echo    make save-investigation Show how to save investigations
 	@echo.
+	@echo  HTI (Structural Search):
+	@echo.
+	@echo    make hti-setup CLIENT=xxx  Full HTI setup for new client
+	@echo    make hti-index CLIENT=xxx  Index repos into HTI (structural search)
+	@echo    make hti-index             Index all clients into HTI
+	@echo    make hti-status            Show HTI index status
+	@echo    make hti-status CLIENT=xxx Show HTI index status (one client)
+	@echo    make hti-migrate CLIENT=xxx Run HTI schema migration
+	@echo.
 	@echo  Quick start for new users:
 	@echo    1. make setup
 	@echo    2. make add-client
 	@echo    3. make crawl CLIENT=your-client
 	@echo    4. make chromadb CLIENT=your-client
-	@echo    5. make server
+	@echo    5. make hti-setup CLIENT=your-client
+	@echo    6. make server
 	@echo.
 
 # ── setup ─────────────────────────────────────────────────
@@ -47,10 +58,14 @@ setup:
 	py -3.12 -m venv .venv
 	.venv\Scripts\pip install --upgrade pip
 	.venv\Scripts\pip install -r requirements.txt
+	@echo.
+	@echo  HTI setup: run 'make hti-setup CLIENT=xxx' for each client after crawling.
 
 # ── crawl-all ─────────────────────────────────────────────
 crawl-all:
 	@.venv\Scripts\python scripts\crawl_all.py --verbose
+	@echo Running HTI indexing for all clients...
+	@.venv\Scripts\python scripts\hti_index_all.py
 
 # ── crawl ─────────────────────────────────────────────────
 crawl:
@@ -59,14 +74,20 @@ ifndef CLIENT
 	@exit /b 1
 else
 	@.venv\Scripts\python ingest\crawl_repos.py --client $(CLIENT) --config clients\$(CLIENT)\repos.yaml --verbose
+	@echo Running HTI indexing...
+	@.venv\Scripts\python hivemind_mcp\hti\indexer.py --client $(CLIENT)
 endif
 
 # ── sync ──────────────────────────────────────────────────
 sync:
 ifdef CLIENT
 	@.venv\Scripts\python scripts\sync_kb.py --client $(CLIENT) --auto-yes
+	@echo Syncing HTI index...
+	@.venv\Scripts\python hivemind_mcp\hti\indexer.py --client $(CLIENT) 2>nul || echo HTI: skipped (not set up for $(CLIENT))
 else
 	@.venv\Scripts\python scripts\sync_kb.py --auto-yes
+	@echo Syncing HTI index for all clients...
+	@.venv\Scripts\python scripts\hti_index_all.py 2>nul || echo HTI: skipped (run make hti-setup first)
 endif
 
 # ── chromadb ──────────────────────────────────────────────
@@ -106,6 +127,9 @@ verify:
 	@.venv\Scripts\python -m pytest tests\ -q
 	@.venv\Scripts\python scripts\sync_kb.py --status
 	@.venv\Scripts\python scripts\populate_chromadb.py --verify
+	@echo.
+	@echo HTI Status:
+	@.venv\Scripts\python -c "import sqlite3; from pathlib import Path; clients=[d.name for d in Path('clients').iterdir() if d.is_dir() and not d.name.startswith('_') and (d/'repos.yaml').exists()]; [print(f'  {c}: {sqlite3.connect(str(Path(f\"memory/{c}/hti.sqlite\"))).execute(\"SELECT COUNT(*) FROM hti_skeletons\").fetchone()[0]:,} skeletons, ' + str(sqlite3.connect(str(Path(f\"memory/{c}/hti.sqlite\"))).execute(\"SELECT COUNT(*) FROM hti_nodes\").fetchone()[0]) + ' nodes') if Path(f'memory/{c}/hti.sqlite').exists() else print(f'  {c}: HTI not indexed (run make hti-setup CLIENT={c})') for c in clients]"
 
 # ── recall ───────────────────────────────────────────────
 QUERY ?=
@@ -143,4 +167,39 @@ start:
 stop:
 	@stop_hivemind.bat
 
-.PHONY: help setup crawl-all crawl sync chromadb chromadb-all status test server add-client docs verify recall save-investigation start stop
+# ── hti-migrate ──────────────────────────────────────────
+hti-migrate:
+ifndef CLIENT
+	@echo ERROR: CLIENT is required. Usage: make hti-migrate CLIENT=dfin
+	@exit /b 1
+else
+	@.venv\Scripts\python hivemind_mcp\hti\migrate.py --client $(CLIENT)
+endif
+
+# ── hti-index ────────────────────────────────────────────
+hti-index:
+ifdef CLIENT
+ifdef FORCE
+	@.venv\Scripts\python hivemind_mcp\hti\indexer.py --client $(CLIENT) --force
+else
+	@.venv\Scripts\python hivemind_mcp\hti\indexer.py --client $(CLIENT)
+endif
+else
+	@.venv\Scripts\python scripts\hti_index_all.py
+endif
+
+# ── hti-status ───────────────────────────────────────────
+hti-status:
+	@.venv\Scripts\python -c "import sqlite3; from pathlib import Path; client='$(CLIENT)'; clients=[client] if client else [d.name for d in Path('clients').iterdir() if d.is_dir() and not d.name.startswith('_') and (d/'repos.yaml').exists()]; [print(f'{c}: {sqlite3.connect(str(Path(f\"memory/{c}/hti.sqlite\"))).execute(\"SELECT COUNT(*) FROM hti_skeletons\").fetchone()[0]:,} skeletons, ' + str(sqlite3.connect(str(Path(f\"memory/{c}/hti.sqlite\"))).execute(\"SELECT COUNT(*) FROM hti_nodes\").fetchone()[0]) + ' nodes') if Path(f'memory/{c}/hti.sqlite').exists() else print(f'{c}: HTI not indexed (run make hti-migrate hti-index CLIENT={c})') for c in clients]"
+
+# ── hti-setup ────────────────────────────────────────────
+hti-setup:
+ifndef CLIENT
+	@echo ERROR: CLIENT is required. Usage: make hti-setup CLIENT=dfin
+	@exit /b 1
+else
+	@$(MAKE) hti-migrate CLIENT=$(CLIENT)
+	@$(MAKE) hti-index CLIENT=$(CLIENT)
+endif
+
+.PHONY: help setup crawl-all crawl sync chromadb chromadb-all status test server add-client docs verify recall save-investigation start stop hti-migrate hti-index hti-status hti-setup

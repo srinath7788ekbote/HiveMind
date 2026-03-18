@@ -4,3 +4,4 @@ REM Syncs ALL clients with --auto-yes (no prompts)
 
 cd /d "%~dp0.."
 .venv\Scripts\python scripts\sync_kb.py --auto-yes
+.venv\Scripts\python scripts\hti_index_all.py >> memory\sync_log.txt 2>&1

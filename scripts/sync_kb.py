@@ -335,6 +335,19 @@ def sync_client(
                     state[key]["synced_at"] = "initial"
 
     _save_state(client, state, root)
+
+    # --- HTI incremental sync (fast — only re-indexes changed files) ---
+    if synced > 0:
+        try:
+            from hivemind_mcp.hti.indexer import index_client as hti_index_client
+            hti_result = hti_index_client(client, force=False, project_root=root)
+            hti_skels = hti_result.get("skeleton_count", 0)
+            print(f"  HTI: {hti_skels} skeletons updated")
+        except ImportError:
+            pass  # HTI not available, skip silently
+        except Exception as e:
+            print(f"  HTI sync warning: {e}")  # Don't fail sync if HTI fails
+
     elapsed = time.time() - start
 
     return {

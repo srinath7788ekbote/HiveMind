@@ -107,6 +107,18 @@ Key tools: `hivemind_get_active_client`, `hivemind_query_memory`, `hivemind_quer
 
 ---
 
+## HTI — Structural Retrieval
+
+Two new tools for precise YAML/HCL navigation:
+- `hivemind_hti_get_skeleton` → returns file skeleton (keys + paths, no values)
+- `hivemind_hti_fetch_nodes` → fetches full content at specific node paths
+
+Use these for any structural query (specific stages, configs, variables, specs). See `.github/copilot-instructions.md` for full routing rules.
+
+Claude Agent advantage: can iterate — if first `node_paths` are wrong, call `fetch_nodes` again with corrected paths. The skeleton stays in context.
+
+---
+
 ## Full Instructions Reference
 
 For complete HiveMind rules, anti-hallucination requirements, citation format, branch protection, incident auto-detection, tool selection guide, and response templates, see `.github/copilot-instructions.md` — loaded automatically by both Copilot Chat and Claude Agent.
