@@ -241,6 +241,13 @@ HiveMind/
 │   ├── incremental_sync.py         #   Incremental re-indexing
 │   └── git_utils.py                #   Git operations
 ├── tests/                          # Test suite (782+ tests)
+├── benchmarks/                     # Automated KB benchmark suite
+│   ├── run_benchmark.py            #   CLI entry point (--version v1/v2)
+│   ├── runner.py                   #   Tool execution engine
+│   ├── evaluator.py                #   Automated scoring (3-point rubric)
+│   ├── questions_v1.py             #   30 original questions
+│   ├── questions_v2.py             #   30 hard questions from real repos
+│   └── manual_benchmark_v1.md      #   Manual scoring worksheet
 ├── memory/                         # Runtime data (gitignored)
 ├── Makefile                        # Build targets
 ├── CLAUDE.md                       # Claude Agent configuration
@@ -271,6 +278,9 @@ HiveMind/
 | `make add-client` | Add a new client interactively |
 | `make docs` | Open the usage guide in VS Code |
 | `make verify` | Run tests + check KB status + verify ChromaDB + HTI status |
+| `make benchmark` | Run v2 benchmark (30 hard questions from real repos) |
+| `make benchmark-v1` | Run v1 benchmark (30 original questions) |
+| `make benchmark-report` | Run v2 benchmark and save report to file |
 | `make recall CLIENT=x QUERY=y` | Search past investigations |
 | `make hti-setup CLIENT=xxx` | Full HTI setup (migrate + index) |
 | `make hti-index CLIENT=xxx` | Index repos into HTI structural DB |

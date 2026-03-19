@@ -488,6 +488,55 @@ make hti-status CLIENT=dfin
 
 ---
 
+## Benchmark Suite
+
+HiveMind includes an automated benchmark to validate KB accuracy after indexing, syncing, or making changes.
+
+### Overview
+
+Two question sets are available:
+
+| Version | Questions | Difficulty | Source |
+|---------|-----------|------------|--------|
+| **v1** | 30 | Standard | Manual benchmark questions covering HTI structural, broad search, and cross-repo queries |
+| **v2** | 30 | Hard | Generated from deep exploration of all 7 DFIN repos — tests non-obvious details like Redis ACL patterns, CIDR calculations, init container sidecars, KEDA autoscaling, disabled role assignments, and ASB queue RBAC |
+
+Each question defines a tool call sequence and validators. Scoring: 3=correct+citation+path, 2=correct+citation, 1=correct only, 0=wrong/missing.
+
+### Running benchmarks
+
+```bash
+# Run v2 (default — 30 hard questions)
+make benchmark
+
+# Run v1 (30 original questions)
+make benchmark-v1
+
+# Run only structural questions (category A)
+make benchmark-quick
+
+# Save report to file
+make benchmark-report
+
+# Advanced: single question, JSON output, custom client
+python benchmarks/run_benchmark.py --question A1 --verbose
+python benchmarks/run_benchmark.py --json > results.json
+python benchmarks/run_benchmark.py --client other-client --version v1
+```
+
+### Exit code
+
+The benchmark exits with code 0 if accuracy >= 75%, otherwise 1. This makes it usable in CI pipelines.
+
+### When to run
+
+- After `make crawl` or `make sync` — verify nothing regressed
+- After `make chromadb` — confirm vector search is working
+- After `make hti-setup` — confirm structural retrieval works
+- Before a release — full validation of KB quality
+
+---
+
 ## Daily Workflow
 
 ### Morning routine (2 minutes)

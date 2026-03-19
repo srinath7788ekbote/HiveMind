@@ -44,6 +44,13 @@ help:
 	@echo    make hti-status CLIENT=xxx Show HTI index status (one client)
 	@echo    make hti-migrate CLIENT=xxx Run HTI schema migration
 	@echo.
+	@echo  Benchmark:
+	@echo.
+	@echo    make benchmark             Run v2 benchmark (30 hard questions)
+	@echo    make benchmark-v1          Run v1 benchmark (30 original questions)
+	@echo    make benchmark-quick       Run one category (A=structural)
+	@echo    make benchmark-report      Run v2 + save report to file
+	@echo.
 	@echo  Quick start for new users:
 	@echo    1. make setup
 	@echo    2. make add-client
@@ -202,4 +209,19 @@ else
 	@$(MAKE) hti-index CLIENT=$(CLIENT)
 endif
 
-.PHONY: help setup crawl-all crawl sync chromadb chromadb-all status test server add-client docs verify recall save-investigation start stop hti-migrate hti-index hti-status hti-setup
+# ── benchmark ────────────────────────────────────────────
+benchmark:
+	@.venv\Scripts\python benchmarks\run_benchmark.py --version v2 --verbose
+
+benchmark-v1:
+	@.venv\Scripts\python benchmarks\run_benchmark.py --version v1 --verbose
+
+benchmark-quick:
+	@.venv\Scripts\python benchmarks\run_benchmark.py --version v2 --verbose --category A
+
+benchmark-report:
+	@.venv\Scripts\python benchmarks\run_benchmark.py --version v2 --verbose --output benchmarks\results.md
+	@echo.
+	@echo  Report saved to benchmarks\results.md
+
+.PHONY: help setup crawl-all crawl sync chromadb chromadb-all status test server add-client docs verify recall save-investigation start stop hti-migrate hti-index hti-status hti-setup benchmark benchmark-v1 benchmark-quick benchmark-report
