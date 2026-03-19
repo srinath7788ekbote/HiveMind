@@ -97,6 +97,16 @@ planner ──→ devops (plan ready → start implementation)
 
 Maximum 3 handoff hops per investigation. Maximum 8 total consultations per task.
 
+### CrewAI-Inspired Coordination Model
+
+Agents now use **phased parallel execution** with a **shared investigation registry**:
+
+- **Semantic Intent Classification**: Team-lead classifies user intent semantically (INCIDENT, STRUCTURAL, DEPENDENCY, DIFF, SECRET_FLOW, PLANNING, GENERAL) and routes accordingly. No keyword matching — reads the full message context.
+- **Phased Execution**: Phase 1 (raw data gathering, parallel) → Phase 2 (specialized analysis using Phase 1 results, parallel) → Phase 3 (synthesis + completeness audit by team-lead).
+- **Shared Investigation Registry**: Team-lead creates a registry of found files, confirmed repos, search coverage, and open gaps. Every subagent receives this registry and does NOT re-search files already listed.
+- **Mandatory Output Contract**: Every agent produces structured output with: FOUND FILES table, specialist findings, WHAT I DELIBERATELY SKIPPED, OPEN GAPS with criticality, CONFIDENCE LEVELS per finding, and HANDOFF TO NEXT AGENT.
+- **Completeness Audit**: Analyst agent runs a structured completeness check (Helm, Terraform, CI, CD, cross-repo, secret chain coverage) before team-lead produces the final report. Confidence downgrades and contradiction detection included.
+
 ---
 
 ## MCP Tools (16 tools)

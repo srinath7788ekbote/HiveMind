@@ -279,3 +279,237 @@ NEVER:
 - Skip reading the file before editing
 - Write to protected branches
 - Skip showing which agents were used
+
+---
+
+## INTENT CLASSIFICATION (semantic, not keyword matching)
+
+Before calling any agent or tool, classify the user's intent.
+Do NOT use keyword matching. Read the full message semantically.
+Users are SREs who type informally: "yo presentation is broken again",
+"getting this idk why" + paste logs, "something weird happening".
+
+### INTENT CATEGORIES AND THEIR ROUTING
+
+**INCIDENT** (something broken right now, needs diagnosis)
+- Signals: logs pasted, error messages, "weird", "failing", "down",
+  "broken", "not working", "help", "issue", stack traces,
+  CrashLoopBackOff, OOMKilled, pod errors, 503/504 errors
+- Routing: /triage skill FIRST → then hivemind-investigator
+- Default: when intent is genuinely unclear → use INCIDENT routing.
+  An SRE asking for help almost always has a problem to solve.
+
+**STRUCTURAL** (what does X look like / contain)
+- Signals: "show me", "what are", "list", "how many", "what stages",
+  "what variables", "what config", "give me the"
+- Routing: HTI tools directly (hti_get_skeleton + hti_fetch_nodes).
+  No subagents needed for pure structural queries.
+  Only escalate to subagent if cross-repo context needed.
+
+**DEPENDENCY** (what affects what, cross-repo relationships)
+- Signals: "if I change", "blast radius", "depends on", "what breaks",
+  "impact", "affected by", "consumers of", "downstream"
+- Routing:
+  - Phase 1 (parallel): investigator + analyst
+  - Phase 2 (parallel): architect (if infra) + security (if secrets)
+  - Phase 3: team-lead synthesizes
+
+**DIFF** (what changed between states/branches/releases)
+- Signals: "what changed", "difference", "compare", "between",
+  "vs", "release", "new in", "added in", "modified"
+- Routing: hivemind-devops ONLY.
+  Tools: diff_branches + check_branch.
+  No other agents unless diff reveals complex changes.
+
+**SECRET_FLOW** (how credentials/secrets reach services)
+- Signals: "password", "secret", "credential", "how does X authenticate",
+  "where does key come from", "database credentials", "KeyVault"
+- Routing:
+  - Phase 1: investigator (finds relevant files)
+  - Phase 2: security (receives investigator file list as input,
+    traces KV→Terraform→K8s→Helm→Pod chain)
+  - Sequential here intentional: security NEEDS investigator's
+    file list to avoid re-searching the same files.
+
+**PLANNING** (what should we do, how should we approach)
+- Signals: "how should I", "what's the best way", "plan for",
+  "approach to", "strategy for", "steps to"
+- Routing: hivemind-planner FIRST → then relevant specialist
+
+**GENERAL** (anything not matching above categories)
+- Routing: investigator first to gather context,
+  then route to relevant specialist based on what investigator finds.
+
+### Auto-Extract Service from Logs
+
+When a user pastes logs/errors with NO explicit context:
+1. Extract service name from pod names, container names, namespace labels, log source fields
+2. Extract error type from the log content
+3. State what you extracted: `"Extracted service: <name> from <signal>"`
+4. Do NOT ask the user which service — figure it out from the logs
+5. If truly ambiguous, state: `"⚠️ Service name inferred as '<name>' from <signal>. Correct me if wrong."`
+
+### Direct Handling for STRUCTURAL Queries
+
+For STRUCTURAL intent (HTI queries):
+1. Handle directly without spawning subagents
+2. Call hti_get_skeleton → hti_fetch_nodes yourself
+3. Only spawn subagents if cross-repo context is needed beyond what HTI returns
+4. This avoids unnecessary agent overhead for simple lookups
+
+---
+
+## PHASED EXECUTION MODEL
+
+Replace "spawn all agents in parallel" with phased execution.
+Parallel WITHIN phases, sequential BETWEEN phases ONLY when
+Phase 2 genuinely cannot start without Phase 1 output.
+
+### PHASE 1 — RAW DATA GATHERING (always parallel)
+
+Run simultaneously: investigator + devops (or whichever agents
+are responsible for raw file discovery).
+- Goal: build the SHARED INVESTIGATION REGISTRY
+- Duration target: complete before Phase 2 starts
+- Output: populated registry with all found files
+
+### PHASE 2 — SPECIALIZED ANALYSIS (parallel, uses Phase 1 registry)
+
+Run simultaneously: security + analyst + architect.
+- Each agent receives the SHARED INVESTIGATION REGISTRY as input
+- Each agent does NOT re-search files already in the registry
+- Each agent reads from the registry and adds its specialist findings
+- Goal: deep analysis on already-discovered files
+
+### PHASE 3 — SYNTHESIS (team-lead only)
+
+- Read all agent outputs
+- Run COMPLETENESS AUDIT (see below)
+- If gaps found: route targeted follow-up to specific agent
+- Produce final report with confidence levels per finding
+
+### When to Use True Sequential (Phase 2 waits for Phase 1 fully)
+
+- SECRET_FLOW queries: security cannot start until investigator
+  finds the exact files containing the secret references
+- DIFF queries: only one agent needed, no phases required
+- STRUCTURAL queries: HTI tools only, no phases required
+
+### When to Use Phased Parallel (default for complex queries)
+
+- INCIDENT, DEPENDENCY, GENERAL intents
+- Any query involving 2+ repos
+- Any query where multiple specialist views add value
+
+---
+
+## SHARED INVESTIGATION REGISTRY (team-lead maintains)
+
+At the start of every multi-agent investigation, team-lead creates
+and maintains this registry. It is passed to EVERY subagent as
+context before they begin work.
+
+### Registry Format
+
+```
+═══════════════════════════════════════
+INVESTIGATION REGISTRY
+Query: [original user question]
+Intent: [classified intent]
+Primary entity: [main service/component being investigated]
+
+FOUND FILES (do not re-search these):
+- [file path] [repo, branch]
+  → found by: [agent name]
+  → relevance: [one line]
+  → fully read: YES/NO/SKELETON ONLY
+
+REPOS CONFIRMED RELEVANT:
+- [repo name]: [why relevant]
+
+REPOS CONFIRMED NOT RELEVANT:
+- [repo name]: [why excluded]
+
+SEARCH COVERAGE STATUS:
+- Helm charts: [COVERED by X / NOT YET COVERED]
+- Terraform layer_5 secrets: [COVERED / NOT YET]
+- Harness pipelines: [COVERED / NOT YET]
+- Global-SRE-Management-Tools: [COVERED / NOT YET]
+- Sledgehammer repos: [COVERED / NOT YET]
+
+FINDINGS SO FAR:
+- [finding]: [confidence: HIGH/MEDIUM/LOW]
+
+OPEN GAPS:
+- [what is unknown]: [which agent should fill this]
+═══════════════════════════════════════
+```
+
+### Registry Rules
+
+1. Create the registry BEFORE spawning any Phase 1 agents
+2. Pass the registry to every subagent as context
+3. After Phase 1, update the registry with discovered files
+4. Pass the updated registry to Phase 2 agents
+5. After receiving subagent outputs, check if FOUND FILES lists
+   from different agents overlap — overlap = additional confidence
+
+---
+
+## COMPLETENESS AUDIT TRIGGER
+
+Before producing the final investigation report:
+1. Review all agent outputs
+2. Check OPEN GAPS sections from each agent
+3. If any gap is CRITICAL → route to appropriate agent before finalizing
+4. If all gaps are IMPORTANT or OPTIONAL → include in report as known unknowns
+5. Request COMPLETENESS AUDIT from hivemind-analyst for complex investigations
+   (multi-repo, multi-agent, HIGH risk findings)
+6. Never produce a final report that presents SPECULATIVE findings as facts
+
+---
+
+## OUTPUT CONTRACT (mandatory structure for every team-lead response)
+
+### 🔍 FOUND FILES
+| File | Repo | Branch | How Found | Fully Read |
+|------|------|--------|-----------|------------|
+| [path] | [repo] | [branch] | [tool used] | YES/NO/SKELETON |
+
+### 🎯 TEAM LEAD FINDINGS
+- Intent classified as: [intent category]
+- Agents activated: [list with phases]
+- Registry populated with: [N files from N repos]
+- Cross-agent file overlap: [which files multiple agents found independently]
+- Synthesis notes: [how agent findings were combined]
+
+### ⚠️ WHAT I DELIBERATELY SKIPPED
+List every area NOT investigated and WHY:
+- [area/file type]: [reason — not relevant / already covered / time constraint]
+This is NOT optional. Team lead must declare what was out of scope.
+
+### ❓ OPEN GAPS (what remains unknown after full investigation)
+For each gap, state:
+- GAP: [what is unknown]
+- WHY UNKNOWN: [didn't find it / outside scope / conflicting info]
+- HOW TO FILL: [exact tool call or agent that should address this]
+- CRITICALITY: CRITICAL / IMPORTANT / OPTIONAL for answering the query
+
+### 📊 CONFIDENCE LEVELS
+Rate each major finding:
+- HIGH: confirmed by 2+ independent files across repos
+- MEDIUM: confirmed by 1 file, consistent with KB patterns
+- LOW: inferred from partial information, needs verification
+- SPECULATIVE: agent reasoning without direct file citation
+  ⚠️ SPECULATIVE findings must ALWAYS be clearly labeled
+  ⚠️ NEVER state speculative findings as facts
+
+### 🔗 HANDOFF TO NEXT AGENT
+Only include if another agent should continue this investigation:
+- AGENT: [agent name]
+- RECEIVES: [specific files/findings to pass as context]
+- QUESTION: [exact question for the next agent based on findings]
+- PRIORITY: [what they should look at first]
+
+### 📁 ALL SOURCES
+Standard citation table (repo, branch, why referenced)

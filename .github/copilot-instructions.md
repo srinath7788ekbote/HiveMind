@@ -512,6 +512,64 @@ When working as a HiveMind agent, you may receive handoff context from another a
 
 ---
 
+## 7.5. 🤝 CrewAI-Inspired Multi-Agent Coordination Model
+
+HiveMind agents now use **phased parallel execution** with a **shared investigation
+registry**. Each agent declares its skipped areas and open gaps. The analyst agent
+performs a **completeness audit** before the team-lead produces the final report.
+
+### Semantic Intent Classification (team-lead)
+
+The team-lead classifies user intent semantically (not by keyword matching) into these
+categories, each with specific routing:
+
+| Intent | Signals | Routing |
+|--------|---------|---------|
+| **INCIDENT** | logs, errors, "broken", "failing", stack traces | /triage → investigator |
+| **STRUCTURAL** | "show me", "what are", "list", "what config" | HTI tools directly (no subagents) |
+| **DEPENDENCY** | "blast radius", "if I change", "what breaks" | Phase 1: investigator + analyst → Phase 2: architect + security |
+| **DIFF** | "what changed", "compare", "between" | devops only |
+| **SECRET_FLOW** | "secret", "credential", "KeyVault" | Sequential: investigator → security |
+| **PLANNING** | "how should I", "steps to", "plan for" | planner → specialist |
+| **GENERAL** | anything else | investigator → specialist |
+
+When intent is genuinely unclear → default to INCIDENT routing.
+
+### Phased Parallel Execution
+
+- **Phase 1** (RAW DATA GATHERING): investigator + devops run in parallel to gather files
+- **Phase 2** (SPECIALIZED ANALYSIS): security + analyst + architect run in parallel using Phase 1 results
+- **Phase 3** (SYNTHESIS): team-lead combines all findings, runs completeness audit
+
+### Shared Investigation Registry
+
+Team-lead maintains a registry passed to every subagent containing:
+- Found files (with who found them — prevents re-searching)
+- Repos confirmed relevant / not relevant
+- Search coverage status per file type (Helm, Terraform, pipelines, etc.)
+- Findings so far with confidence levels
+- Open gaps with which agent should fill them
+
+### Mandatory Output Contract (all agents)
+
+Every agent produces structured output with these sections:
+- **FOUND FILES**: table of all files touched with how they were found
+- **[SPECIALIST FINDINGS]**: agent-specific analysis (different per agent)
+- **WHAT I DELIBERATELY SKIPPED**: declared blindspots
+- **OPEN GAPS**: unknowns with criticality + how to fill them
+- **CONFIDENCE LEVELS**: HIGH / MEDIUM / LOW / SPECULATIVE per finding
+- **HANDOFF TO NEXT AGENT**: typed handoff with context
+
+### Completeness Audit (analyst runs last)
+
+Before the final report, the analyst checks:
+- Coverage checklist (Helm, Terraform, CI, CD, cross-repo, secret chain)
+- Confidence downgrades (HIGH → MEDIUM if only 1 source)
+- Contradiction detection between agents
+- Verdict: COMPLETE / INCOMPLETE / PARTIAL
+
+---
+
 ## 8. 🚨 Automatic Incident Investigation Trigger
 
 When a user pastes logs, errors, or incident data, Copilot MUST automatically begin a full knowledge-base-driven investigation. **Do NOT wait for the user to ask.** The paste IS the request.

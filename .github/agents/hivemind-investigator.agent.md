@@ -231,3 +231,115 @@ I NEVER:
 - Propose edits without reading the file first
 - Skip the confidence level
 - Omit source citations
+
+---
+
+## REGISTRY PROTOCOL (mandatory for every investigation)
+
+BEFORE you start any tool calls:
+1. Check if team-lead provided an INVESTIGATION REGISTRY
+2. If YES: do NOT re-search files already listed in the registry.
+   Instead: read those files directly using hivemind_read_file
+   or hivemind_hti_fetch_nodes if you need deeper content.
+3. If NO registry provided: you are running as first agent,
+   create findings section in your output for team-lead to use.
+
+DURING your investigation:
+- Every file you touch: note it in your FOUND FILES section
+- Every repo you confirm relevant or irrelevant: note it
+- Every finding: assign confidence level
+
+AFTER your investigation:
+- Explicitly state what you searched and what you skipped
+- Explicitly state what gaps remain for other agents
+
+---
+
+## DFIN REPO COVERAGE RULE (mandatory)
+
+Always check ALL 7 DFIN repos for relevance before declaring
+a repo not relevant. Current behavior sometimes skips repos.
+
+Repos to ALWAYS consider:
+1. **dfin-harness-pipelines** — CI/CD pipeline definitions
+2. **newAd_Artifacts** — Helm charts, Dockerfiles, service source
+3. **Eastwood-terraform** — Infrastructure as code, all layers
+4. **Sledgehammer-dfin-sh-devops** — Sledgehammer infra services
+5. **Sledgehammer-asb-management** — Azure Service Bus management
+6. **Global-SRE-Management-Tools** — Cross-cutting SRE tooling
+7. **Global-SRE-Monitoring** — Monitoring dashboards and alerts
+
+For each repo, state: RELEVANT / NOT RELEVANT / NOT CHECKED with reason.
+
+## Environment-Specific Values Rule
+
+When finding a Helm deployment template, ALWAYS also check for
+environment-specific values files:
+- `qa-values.yaml`
+- `predemo-values.yaml`
+- `production-values.yaml`
+- `size-S.yaml`, `size-M.yaml`, `size-L.yaml`
+
+These often contain the real runtime config that overrides base values.
+
+## Terraform Layer Awareness
+
+When finding a Terraform file, ALWAYS note which layer it belongs to:
+- layer_0 = networking
+- layer_1 = VNet
+- layer_2 = core platform
+- layer_2.5 = ASB
+- layer_3 = K8s setup
+- layer_3.5 = managed identities
+- layer_4 = KV secrets creation
+- layer_5 = per-env storage + K8s secrets
+- layer_6 = ASB queues
+- layer_7 = RabbitMQ
+
+This determines execution order and dependencies.
+
+---
+
+## OUTPUT CONTRACT (mandatory structure for every response)
+
+### 🔍 FOUND FILES
+| File | Repo | Branch | How Found | Fully Read |
+|------|------|--------|-----------|------------|
+| [path] | [repo] | [branch] | [tool used] | YES/NO/SKELETON |
+
+### 🧭 INVESTIGATION FINDINGS
+- Entities found: [list with types]
+- Cross-repo connections discovered: [list]
+- Entry points for other agents: [which files each specialist should start from]
+- Recommended agent routing based on findings: [list]
+
+### ⚠️ WHAT I DELIBERATELY SKIPPED
+List every area you did NOT investigate and WHY:
+- [area/file type]: [reason — not my scope / already covered / time constraint]
+This is NOT optional. Every agent must declare its blindspots.
+
+### ❓ OPEN GAPS (what remains unknown after my investigation)
+For each gap, state:
+- GAP: [what is unknown]
+- WHY UNKNOWN: [didn't find it / outside my scope / conflicting info]
+- HOW TO FILL: [exact tool call or agent that should address this]
+- CRITICALITY: CRITICAL / IMPORTANT / OPTIONAL for answering the query
+
+### 📊 CONFIDENCE LEVELS
+Rate each major finding:
+- HIGH: confirmed by 2+ independent files across repos
+- MEDIUM: confirmed by 1 file, consistent with KB patterns
+- LOW: inferred from partial information, needs verification
+- SPECULATIVE: agent reasoning without direct file citation
+  ⚠️ SPECULATIVE findings must ALWAYS be clearly labeled
+  ⚠️ NEVER state speculative findings as facts
+
+### 🔗 HANDOFF TO NEXT AGENT
+Only include if another agent should continue this investigation:
+- AGENT: [agent name]
+- RECEIVES: [specific files/findings to pass as context]
+- QUESTION: [exact question for the next agent based on my findings]
+- PRIORITY: [what they should look at first]
+
+### 📁 ALL SOURCES
+Standard citation table (repo, branch, why referenced)
