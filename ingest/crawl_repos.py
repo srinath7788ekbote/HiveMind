@@ -25,7 +25,8 @@ from ingest.discovery.build_profile import build_profile
 from ingest.extract_relationships import extract_relationships, save_to_graph_db
 from ingest.embed_chunks import embed_repo
 from ingest.branch_indexer import BranchIndex, get_current_branch, get_repo_branches, classify_branch_tier
-from ingest.classify_files import classify_directory
+from ingest.classify_files import classify_directory, classify_file_list
+from sync.git_utils import get_head_hash
 
 
 def _load_config(config_path: str) -> dict:
@@ -84,12 +85,42 @@ def _ensure_memory_dir(client: str) -> Path:
     return mem_dir
 
 
+def _seed_sync_state(client: str, repos: list[dict], mem_dir: Path):
+    """Create sync_state.json from current HEAD hashes so 'make sync' has a baseline."""
+    state_path = mem_dir / "sync_state.json"
+    state = {}
+    if state_path.exists():
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            state = {}
+
+    for repo_config in repos:
+        repo_path = repo_config.get("path", "")
+        repo_name = repo_config.get("name", "")
+        if not repo_path or not Path(repo_path).exists():
+            continue
+        for branch in repo_config.get("branches", ["main"]):
+            key = f"{repo_name}/{branch}"
+            commit = get_head_hash(repo_path, branch)
+            if commit:
+                state[key] = {
+                    "commit": commit,
+                    "synced_at": time.strftime("%Y-%m-%d %H:%M"),
+                }
+
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+
 def crawl(
     client: str,
     config_path: str,
     branches: list[str] = None,
     incremental: bool = False,
     verbose: bool = False,
+    changed_files: list[str] | None = None,
+    repo_name_filter: str | None = None,
 ) -> dict:
     """
     Main crawl function. Orchestrates all ingestion steps.
@@ -100,6 +131,9 @@ def crawl(
         branches: Specific branches to index. If None, use config defaults.
         incremental: Only update changed files.
         verbose: Print detailed progress.
+        changed_files: Optional list of relative file paths that changed.
+            When provided, only these files are classified/embedded (fast sync).
+        repo_name_filter: Optional repo name to process. Skips all other repos.
 
     Returns:
         Summary dict with counts and timing.
@@ -128,6 +162,10 @@ def crawl(
         repo_path = repo_config.get("path", "")
         repo_name = repo_config.get("name", Path(repo_path).name if repo_path else "unknown")
 
+        # Skip repos that don't match the filter
+        if repo_name_filter and repo_name != repo_name_filter:
+            continue
+
         if not repo_path or not Path(repo_path).exists():
             if verbose:
                 print(f"  SKIP: {repo_name} — path does not exist: {repo_path}")
@@ -144,36 +182,67 @@ def crawl(
             if verbose:
                 print(f"    Branch: {branch}")
 
-            # Classify files
-            classifications = classify_directory(repo_path, repo_path)
-            total_files += len(classifications)
+            # Build absolute paths for changed files if provided
+            abs_changed = None
+            if changed_files:
+                abs_changed = []
+                for f in changed_files:
+                    fp = Path(repo_path) / f
+                    if fp.exists():
+                        abs_changed.append(str(fp))
+                if verbose and abs_changed:
+                    print(f"      (incremental: {len(abs_changed)} changed files)")
 
-            # Extract relationships
-            edges = extract_relationships(repo_path)
+            # Classify files — fast path when changed_files is provided
+            if verbose:
+                print(f"      [1/3] Classifying files...", end="", flush=True)
+            if abs_changed:
+                classifications = classify_file_list(abs_changed, repo_path)
+            else:
+                classifications = classify_directory(repo_path, repo_path)
+            total_files += len(classifications)
+            if verbose:
+                print(f" {len(classifications)} files")
+
+            # Extract relationships — only from changed files when available
+            if verbose:
+                print(f"      [2/3] Extracting relationships...", end="", flush=True)
+            if abs_changed and len(abs_changed) < 200:
+                # For small change sets, extract from changed files only
+                # (existing edges from unchanged files are already in graph DB)
+                edges = extract_relationships(repo_path, file_classifications=classifications)
+            else:
+                edges = extract_relationships(repo_path)
             for edge in edges:
                 edge["branch"] = branch
             total_edges += len(edges)
-
             if verbose:
-                print(f"      Edges: {len(edges)}")
+                print(f" {len(edges)} edges")
 
             # Save edges to graph DB
             save_to_graph_db(edges, graph_db_path)
 
-            # Embed chunks
+            # Embed chunks — mtime-based skip handles incremental automatically
+            if verbose:
+                print(f"      [3/3] Embedding chunks...", flush=True)
             result = embed_repo(
                 repo_path=repo_path,
                 memory_dir=str(mem_dir),
                 branch=branch,
                 collection_name=f"{repo_name}_{branch}",
+                verbose=verbose,
             )
             total_chunks += result.get("chunk_count", 0)
 
             if verbose:
-                print(f"      Chunks: {result.get('chunk_count', 0)}")
+                skipped = result.get("skipped_files", 0)
+                embedded = result.get("file_count", 0)
+                chunks = result.get("chunk_count", 0)
+                print(f"      Done: {chunks} chunks from {embedded} files ({skipped} unchanged skipped)")
 
-            # Mark branch as indexed
-            branch_index.mark_indexed(repo_name, branch)
+            # Mark branch as indexed with commit hash for incremental sync
+            commit_hash = get_head_hash(repo_path, branch)
+            branch_index.mark_indexed(repo_name, branch, commit_hash)
 
             # Collect entities
             for clf in classifications:
@@ -192,20 +261,24 @@ def crawl(
     with open(entities_path, 'w', encoding='utf-8') as f:
         json.dump(all_entities, f, indent=2)
 
-    # Build profile
-    if verbose:
-        print("\n  Building discovered profile...")
+    # Build profile and seed state only for full crawls, not incremental syncs
+    if not repo_name_filter and not changed_files:
+        if verbose:
+            print("\n  Building discovered profile...")
 
-    profile = build_profile(
-        client_name=client,
-        repo_configs=repos,
-        output_dir=str(mem_dir),
-    )
+        profile = build_profile(
+            client_name=client,
+            repo_configs=repos,
+            output_dir=str(mem_dir),
+        )
 
-    # Set active branch
-    default_branch = config.get("default_branch", "develop")
-    active_branch_file = mem_dir / "active_branch.txt"
-    active_branch_file.write_text(default_branch, encoding='utf-8')
+        # Set active branch
+        default_branch = config.get("default_branch", "develop")
+        active_branch_file = mem_dir / "active_branch.txt"
+        active_branch_file.write_text(default_branch, encoding='utf-8')
+
+        # Seed sync_state.json so "make sync" has a baseline
+        _seed_sync_state(client, repos, mem_dir)
 
     elapsed = time.time() - start_time
 

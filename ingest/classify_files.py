@@ -160,3 +160,37 @@ def classify_directory(dir_path: str, repo_root: str = "") -> list[dict]:
         })
 
     return results
+
+
+def classify_file_list(file_paths: list[str], repo_root: str = "") -> list[dict]:
+    """
+    Classify an explicit list of files (fast path for incremental sync).
+
+    Args:
+        file_paths: List of absolute file paths to classify.
+        repo_root: Root of the repository.
+
+    Returns:
+        List of dicts with keys: file, classification, relative_path
+    """
+    results = []
+    repo = Path(repo_root) if repo_root else None
+
+    for fp in file_paths:
+        file_path = Path(fp)
+        if not file_path.is_file():
+            continue
+
+        classification = classify_file(str(file_path), repo_root)
+        try:
+            rel = str(file_path.relative_to(repo)) if repo else str(file_path)
+        except ValueError:
+            rel = str(file_path)
+
+        results.append({
+            "file": str(file_path),
+            "relative_path": rel,
+            "classification": classification,
+        })
+
+    return results

@@ -31,14 +31,27 @@ def get_chromadb_ef():
     return _default_ef
 
 
-def embed_texts(texts: list[str]) -> list[list[float]]:
+def embed_texts(texts: list[str], batch_size: int = 256, verbose: bool = False) -> list[list[float]]:
     """
     Compute embeddings for a list of texts using the ONNX model.
 
-    Maintains the same function signature for compatibility with
-    embed_chunks.py and query_memory.py.
+    Batches internally to avoid memory pressure and provide progress.
     """
     if not texts:
         return []
     ef = get_chromadb_ef()
-    return ef(texts)
+
+    # Small list — embed in one shot
+    if len(texts) <= batch_size:
+        return ef(texts)
+
+    # Large list — batch with progress
+    all_embeddings = []
+    total = len(texts)
+    for i in range(0, total, batch_size):
+        batch = texts[i:i + batch_size]
+        all_embeddings.extend(ef(batch))
+        done = min(i + batch_size, total)
+        if verbose:
+            print(f"             Embedded {done}/{total} chunks...", flush=True)
+    return all_embeddings

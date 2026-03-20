@@ -20,6 +20,9 @@ help:
 	@echo    make crawl CLIENT=xxx   Index single client
 	@echo    make sync               Sync all changed files (daily)
 	@echo    make sync CLIENT=xxx    Sync single client
+	@echo    make full-sync           Fetch remotes + sync + ChromaDB + HTI
+	@echo    make full-sync CLIENT=xxx  Full sync for one client
+	@echo    make bootstrap-state    Seed sync baseline (fix stuck sync)
 	@echo    make chromadb           Populate ChromaDB (all clients)
 	@echo    make chromadb CLIENT=xxx Populate ChromaDB (one client)
 	@echo    make chromadb-all       Populate ChromaDB for all discovered clients
@@ -95,6 +98,57 @@ else
 	@.venv\Scripts\python scripts\sync_kb.py --auto-yes
 	@echo Syncing HTI index for all clients...
 	@.venv\Scripts\python scripts\hti_index_all.py 2>nul || echo HTI: skipped (run make hti-setup first)
+endif
+
+# ── full-sync ─────────────────────────────────────────────
+# Fetches from all remotes, syncs KB, rebuilds ChromaDB, and re-indexes HTI.
+full-sync:
+ifdef CLIENT
+	@echo.
+	@echo ============================================
+	@echo  FULL SYNC: $(CLIENT)
+	@echo ============================================
+	@echo.
+	@echo [1/3] Fetching remotes + syncing KB...
+	@.venv\Scripts\python scripts\sync_kb.py --client $(CLIENT) --auto-yes --fetch
+	@echo.
+	@echo [2/3] Populating ChromaDB...
+	@.venv\Scripts\python scripts\populate_chromadb.py --client $(CLIENT)
+	@echo.
+	@echo [3/3] Indexing HTI...
+	@.venv\Scripts\python hivemind_mcp\hti\indexer.py --client $(CLIENT) 2>nul || echo HTI: skipped (not set up for $(CLIENT))
+	@echo.
+	@echo ============================================
+	@echo  FULL SYNC COMPLETE: $(CLIENT)
+	@echo ============================================
+else
+	@echo.
+	@echo ============================================
+	@echo  FULL SYNC: ALL CLIENTS
+	@echo ============================================
+	@echo.
+	@echo [1/3] Fetching remotes + syncing KB...
+	@.venv\Scripts\python scripts\sync_kb.py --auto-yes --fetch
+	@echo.
+	@echo [2/3] Populating ChromaDB...
+	@.venv\Scripts\python scripts\populate_all_chromadb.py
+	@echo.
+	@echo [3/3] Indexing HTI...
+	@.venv\Scripts\python scripts\hti_index_all.py 2>nul || echo HTI: skipped (run make hti-setup first)
+	@echo.
+	@echo ============================================
+	@echo  FULL SYNC COMPLETE: ALL CLIENTS
+	@echo ============================================
+endif
+
+# ── bootstrap-state ──────────────────────────────────────
+# Seed sync_state.json from current HEAD commits so 'make sync' has a baseline.
+# Use this if sync keeps showing all files as changed.
+bootstrap-state:
+ifdef CLIENT
+	@.venv\Scripts\python scripts\sync_kb.py --bootstrap --client $(CLIENT)
+else
+	@.venv\Scripts\python scripts\sync_kb.py --bootstrap
 endif
 
 # ── chromadb ──────────────────────────────────────────────
@@ -224,4 +278,4 @@ benchmark-report:
 	@echo.
 	@echo  Report saved to benchmarks\results.md
 
-.PHONY: help setup crawl-all crawl sync chromadb chromadb-all status test server add-client docs verify recall save-investigation start stop hti-migrate hti-index hti-status hti-setup benchmark benchmark-v1 benchmark-quick benchmark-report
+.PHONY: help setup crawl-all crawl sync full-sync chromadb chromadb-all status test server add-client docs verify recall save-investigation start stop hti-migrate hti-index hti-status hti-setup benchmark benchmark-v1 benchmark-quick benchmark-report

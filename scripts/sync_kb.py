@@ -114,9 +114,113 @@ def _save_state(client: str, state: dict, project_root: Path | None = None):
     p.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 
+def _bootstrap_state_from_branch_index(
+    client: str,
+    repos: list[dict],
+    project_root: Path | None = None,
+) -> dict:
+    """
+    Bootstrap sync_state.json from branch_index.json and current HEAD hashes.
+
+    If the initial crawl didn't create sync_state.json, this seeds it from
+    the current HEAD commits so that subsequent syncs detect only real changes.
+    """
+    root = project_root or PROJECT_ROOT
+    state: dict = {}
+    seeded = 0
+
+    for repo in repos:
+        repo_name = repo.get("name", "")
+        repo_path = repo.get("path", "")
+        branches = repo.get("branches", ["main"])
+
+        if not repo_path or not Path(repo_path).exists():
+            continue
+
+        for branch in branches:
+            key = f"{repo_name}/{branch}"
+            head = _git_head_commit(repo_path, branch)
+            if head:
+                state[key] = {
+                    "commit": head,
+                    "synced_at": "bootstrapped",
+                }
+                seeded += 1
+
+    if state:
+        _save_state(client, state, root)
+        print(f"  [i] Bootstrapped sync state for {seeded} repo/branch pairs")
+        print(f"      Future syncs will only detect changes from this point.")
+
+    return state
+
+
 # ---------------------------------------------------------------------------
 # Git helpers
 # ---------------------------------------------------------------------------
+
+def _git_fetch(repo_path: str) -> bool:
+    """Fetch latest from origin for a repo."""
+    try:
+        result = subprocess.run(
+            ["git", "fetch", "origin", "--prune"],
+            capture_output=True, text=True, cwd=repo_path, timeout=120,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _git_current_branch(repo_path: str) -> str | None:
+    """Return the currently checked-out branch name, or None if detached."""
+    try:
+        result = subprocess.run(
+            ["git", "branch", "--show-current"],
+            capture_output=True, text=True, cwd=repo_path, timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
+def _git_update_local_branch(repo_path: str, branch: str) -> tuple[bool, str]:
+    """
+    Fast-forward a local branch to match origin/<branch>.
+
+    For the currently checked-out branch: git pull --ff-only.
+    For other branches: git branch -f <branch> origin/<branch>.
+
+    Returns (success, message).
+    """
+    current = _git_current_branch(repo_path)
+
+    if current == branch:
+        # Currently checked out — use pull --ff-only (safe, won't overwrite local changes)
+        try:
+            result = subprocess.run(
+                ["git", "pull", "--ff-only", "origin", branch],
+                capture_output=True, text=True, cwd=repo_path, timeout=60,
+            )
+            if result.returncode == 0:
+                return True, "pulled"
+            return False, result.stderr.strip()[:100]
+        except Exception as e:
+            return False, str(e)[:100]
+    else:
+        # Not checked out — force-update the local ref to match remote
+        try:
+            result = subprocess.run(
+                ["git", "branch", "-f", branch, f"origin/{branch}"],
+                capture_output=True, text=True, cwd=repo_path, timeout=30,
+            )
+            if result.returncode == 0:
+                return True, "updated"
+            return False, result.stderr.strip()[:100]
+        except Exception as e:
+            return False, str(e)[:100]
+
 
 def _git_file_hash(repo_path: str, branch: str, file_path: str) -> str | None:
     """Return the hash of a file on a given branch via git show."""
@@ -197,7 +301,8 @@ def _sync_repo_branch(
         return {"status": "up_to_date", "files_changed": 0, "new_commit": head}
 
     changed = _git_changed_files(repo_path, branch, prev_commit if not force else None)
-    return {"status": "changed", "files_changed": len(changed), "new_commit": head}
+    return {"status": "changed", "files_changed": len(changed),
+            "changed_file_list": changed, "new_commit": head}
 
 
 # ---------------------------------------------------------------------------
@@ -255,6 +360,7 @@ def sync_client(
     branch_filter: str | None = None,
     auto_yes: bool = False,
     project_root: Path | None = None,
+    fetch: bool = False,
 ) -> dict:
     """
     Sync a single client. Returns summary dict.
@@ -264,6 +370,52 @@ def sync_client(
     config = _load_config(config_path)
     repos = config.get("repos", [])
     state = _load_state(client, root)
+
+    # Fetch latest from remotes and update local branches if requested
+    if fetch:
+        fetched_repos = set()
+        for repo in repos:
+            repo_name = repo.get("name", "unknown")
+            repo_path = repo.get("path", "")
+            branches = repo.get("branches", ["main"])
+            if repo_filter and repo_name != repo_filter:
+                continue
+            if not repo_path or not Path(repo_path).exists():
+                continue
+            if branch_filter:
+                branches = [branch_filter] if branch_filter in branches else []
+            if repo_path not in fetched_repos:
+                print(f"  [>] Fetching {repo_name}...", end="", flush=True)
+                if _git_fetch(repo_path):
+                    print(" done")
+                else:
+                    print(" FAILED (fetch)")
+                    fetched_repos.add(repo_path)
+                    continue
+                fetched_repos.add(repo_path)
+            # Fast-forward only the specific branches listed in repos.yaml
+            for branch in branches:
+                ok, msg = _git_update_local_branch(repo_path, branch)
+                if ok:
+                    print(f"      {branch}: {msg}")
+                else:
+                    print(f"      {branch}: FAILED ({msg})")
+
+    # Auto-bootstrap: if no sync state exists, seed from current HEAD commits
+    # so we don't re-index everything on the first sync.
+    if not state:
+        print(f"  [i] No sync state found — bootstrapping from current HEAD commits...")
+        state = _bootstrap_state_from_branch_index(client, repos, root)
+        if state:
+            print(f"      Run 'make sync' again to detect only new changes.")
+            return {
+                "client": client,
+                "synced": 0,
+                "skipped": len(repos),
+                "errors": 0,
+                "elapsed": 0.0,
+                "bootstrapped": True,
+            }
 
     synced = 0
     skipped = 0
@@ -294,7 +446,9 @@ def sync_client(
                 print(f"  [OK] {key} -- up to date")
                 skipped += 1
             elif result["status"] == "changed":
-                print(f"  [!] {key} -- {result['files_changed']} files changed")
+                n_changed = result['files_changed']
+                changed_list = result.get('changed_file_list', [])
+                print(f"  [!] {key} -- {n_changed} files changed")
                 # Re-index this branch
                 try:
                     from ingest.crawl_repos import crawl
@@ -303,22 +457,29 @@ def sync_client(
                         if answer and answer != "y":
                             skipped += 1
                             continue
+                    t0 = time.time()
+                    print(f"    Syncing {key}...")
                     crawl(
                         client=client,
                         config_path=str(config_path),
                         branches=[branch],
-                        verbose=False,
+                        verbose=True,
+                        changed_files=changed_list if changed_list else None,
+                        repo_name_filter=repo_name,
                     )
+                    elapsed_branch = time.time() - t0
+                    print(f"    Synced {key} ({elapsed_branch:.0f}s)")
                     synced += 1
                 except Exception as exc:
                     print(f"    [X] Error re-indexing {key}: {exc}")
                     errors += 1
                     continue
-                # Update state
+                # Update state immediately so Ctrl+C doesn't lose progress
                 state[key] = {
                     "commit": result["new_commit"],
                     "synced_at": time.strftime("%Y-%m-%d %H:%M"),
                 }
+                _save_state(client, state, root)
             else:
                 print(f"  [X] {key} -- {result.get('message', 'error')}")
                 errors += 1
@@ -370,6 +531,7 @@ def sync_all(
     branch_filter: str | None = None,
     auto_yes: bool = False,
     project_root: Path | None = None,
+    fetch: bool = False,
 ):
     """Sync one or many clients, with summary output."""
     root = project_root or PROJECT_ROOT
@@ -393,6 +555,7 @@ def sync_all(
             branch_filter=branch_filter,
             auto_yes=auto_yes,
             project_root=root,
+            fetch=fetch,
         )
         summaries.append(summary)
 
@@ -435,6 +598,10 @@ def main():
                         help="Sync a specific branch only (requires --repo)")
     parser.add_argument("--auto-yes", action="store_true",
                         help="Skip confirmation prompts (for scheduled runs)")
+    parser.add_argument("--fetch", action="store_true",
+                        help="Fetch latest from all remotes before syncing")
+    parser.add_argument("--bootstrap", action="store_true",
+                        help="Bootstrap sync state from current HEAD (no re-index)")
     args = parser.parse_args()
 
     # Determine client list
@@ -453,7 +620,15 @@ def main():
     if args.branch and not args.repo:
         parser.error("--branch requires --repo")
 
-    if args.status:
+    if args.bootstrap:
+        for client in clients:
+            config_path = PROJECT_ROOT / "clients" / client / "repos.yaml"
+            config = _load_config(config_path)
+            repos = config.get("repos", [])
+            print(f"\n-- CLIENT: {client} " + "-" * (46 - len(client)))
+            _bootstrap_state_from_branch_index(client, repos, PROJECT_ROOT)
+        print("\nDone. Run 'make sync' to detect only new changes.")
+    elif args.status:
         show_status(clients, PROJECT_ROOT)
     else:
         sync_all(
@@ -463,6 +638,7 @@ def main():
             branch_filter=args.branch,
             auto_yes=args.auto_yes,
             project_root=PROJECT_ROOT,
+            fetch=args.fetch,
         )
 
 

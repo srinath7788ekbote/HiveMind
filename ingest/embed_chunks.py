@@ -171,6 +171,24 @@ def _write_json_chunks(mem: Path, collection_name: str, all_chunks: list[dict]):
         json.dump(list(existing.values()), f, indent=1)
 
 
+def _load_embed_state(mem: Path, collection_name: str) -> dict:
+    """Load the mtime checkpoint for a collection. {rel_path: mtime_epoch}."""
+    state_file = mem / "vectors" / f".{collection_name}.state.json"
+    if state_file.exists():
+        try:
+            return json.loads(state_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def _save_embed_state(mem: Path, collection_name: str, state: dict):
+    """Persist the mtime checkpoint for a collection."""
+    state_file = mem / "vectors" / f".{collection_name}.state.json"
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state_file.write_text(json.dumps(state, separators=(",", ":")), encoding="utf-8")
+
+
 def embed_repo(
     repo_path: str,
     memory_dir: str,
@@ -178,9 +196,12 @@ def embed_repo(
     collection_name: Optional[str] = None,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     file_extensions: Optional[set] = None,
+    verbose: bool = False,
 ) -> dict:
     """
     Embed all relevant files from a repository into ChromaDB.
+
+    Incremental: skips files whose mtime hasn't changed since last run.
 
     Args:
         repo_path: Absolute path to the repo.
@@ -191,7 +212,7 @@ def embed_repo(
         file_extensions: Set of file extensions to include. Defaults to common ones.
 
     Returns:
-        dict with keys: chunk_count, file_count, collection_name
+        dict with keys: chunk_count, file_count, collection_name, skipped_files
     """
     repo = Path(repo_path)
     mem = Path(memory_dir)
@@ -209,8 +230,12 @@ def embed_repo(
         '.gz', '.exe', '.dll', '.bin', '.pyc', '.lock',
     }
 
+    # Load mtime checkpoint for incremental embedding
+    embed_state = _load_embed_state(mem, collection_name)
+
     all_chunks = []
     file_count = 0
+    skipped_files = 0
 
     for file_path in repo.rglob("*"):
         if not file_path.is_file():
@@ -223,13 +248,37 @@ def embed_repo(
         if '.git' in file_path.parts:
             continue
 
+        # Incremental: skip files whose mtime hasn't changed
+        try:
+            rel_path = str(file_path.relative_to(repo)).replace("\\", "/")
+        except ValueError:
+            rel_path = str(file_path)
+
+        current_mtime = int(file_path.stat().st_mtime)
+        prev_mtime = embed_state.get(rel_path)
+        if prev_mtime is not None and prev_mtime >= current_mtime:
+            skipped_files += 1
+            continue
+
         chunks = _file_to_chunks(str(file_path), str(repo), branch, chunk_size)
         if chunks:
             all_chunks.extend(chunks)
             file_count += 1
+            # Record mtime for this file (will be persisted at end)
+            embed_state[rel_path] = current_mtime
+            if verbose and file_count % 50 == 0:
+                print(f"             {file_count} files chunked ({len(all_chunks)} chunks)...", flush=True)
+
+    if verbose:
+        if skipped_files:
+            print(f"             {skipped_files} unchanged files skipped", flush=True)
+        print(f"             {file_count} files -> {len(all_chunks)} chunks to embed", flush=True)
 
     if not all_chunks:
-        return {"chunk_count": 0, "file_count": 0, "collection_name": collection_name}
+        # Still save state so skipped files stay cached
+        _save_embed_state(mem, collection_name, embed_state)
+        return {"chunk_count": 0, "file_count": 0, "collection_name": collection_name,
+                "skipped_files": skipped_files}
 
     # Try to use ChromaDB for vector storage
     try:
@@ -242,7 +291,9 @@ def embed_repo(
         all_texts = [c["text"] for c in all_chunks]
 
         # Pre-compute all embeddings (runs in seconds, not minutes)
-        all_embeddings = embed_texts(all_texts)
+        if verbose:
+            print(f"             Computing embeddings for {len(all_texts)} chunks...", flush=True)
+        all_embeddings = embed_texts(all_texts, verbose=verbose)
 
         collection = client.get_or_create_collection(
             name=collection_name,
@@ -252,7 +303,8 @@ def embed_repo(
 
         # Upsert with pre-computed embeddings
         batch_size = 500
-        for i in range(0, len(all_chunks), batch_size):
+        total_batches = (len(all_chunks) + batch_size - 1) // batch_size
+        for batch_num, i in enumerate(range(0, len(all_chunks), batch_size), 1):
             batch = all_chunks[i:i + batch_size]
             batch_embeds = all_embeddings[i:i + batch_size]
             collection.upsert(
@@ -261,6 +313,8 @@ def embed_repo(
                 metadatas=[c["metadata"] for c in batch],
                 embeddings=batch_embeds,
             )
+            if verbose:
+                print(f"             Upserted batch {batch_num}/{total_batches} ({min(i + batch_size, len(all_chunks))}/{len(all_chunks)} chunks)", flush=True)
 
         # Also write JSON for fallback / non-ChromaDB queries
         _write_json_chunks(mem, collection_name, all_chunks)
@@ -269,8 +323,12 @@ def embed_repo(
         # Fallback: store as JSON for basic search
         _write_json_chunks(mem, collection_name, all_chunks)
 
+    # Persist mtime state so next run skips unchanged files
+    _save_embed_state(mem, collection_name, embed_state)
+
     return {
         "chunk_count": len(all_chunks),
         "file_count": file_count,
+        "skipped_files": skipped_files,
         "collection_name": collection_name,
     }

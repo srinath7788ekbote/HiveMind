@@ -228,6 +228,25 @@ def extract_relationships(
 
     edges = []
 
+    # When file_classifications is provided, only process those specific files
+    # instead of scanning the entire repo tree
+    if file_classifications:
+        for clf in file_classifications:
+            f = Path(clf["file"])
+            if not f.exists():
+                continue
+            cls = clf.get("classification", "")
+            if cls == "pipeline" or f.name in ("pipeline.yaml", "pipeline.yml"):
+                edges.extend(_extract_from_pipeline(f, repo))
+            elif cls == "terraform" or f.suffix == ".tf":
+                edges.extend(_extract_from_terraform(f, repo))
+            elif cls in ("helm_chart", "helm_values", "template") or "templates" in f.parts:
+                if f.suffix in (".yaml", ".yml"):
+                    edges.extend(_extract_from_helm_template(f, repo))
+        return edges
+
+    # Full repo scan (no file list provided)
+
     # Process pipeline files
     for f in repo.rglob("pipeline.yaml"):
         edges.extend(_extract_from_pipeline(f, repo))
