@@ -1,6 +1,6 @@
 @echo off
 cd /d C:\Users\sekbote\Documents\HiveMind
-echo [%date% %time%] Starting HiveMind full-sync >> memory\sync_log.txt 2>&1
+echo [%date% %time%] Starting HiveMind nightly sync >> memory\sync_log.txt 2>&1
 .venv\Scripts\python.exe scripts\sync_kb.py --client dfin --fetch >> memory\sync_log.txt 2>&1
 .venv\Scripts\python.exe scripts\hti_index_all.py >> memory\sync_log.txt 2>&1
-echo [%date% %time%] Full-sync complete >> memory\sync_log.txt 2>&1
+echo [%date% %time%] Sync complete >> memory\sync_log.txt 2>&1

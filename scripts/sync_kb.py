@@ -602,6 +602,8 @@ def main():
                         help="Fetch latest from all remotes before syncing")
     parser.add_argument("--bootstrap", action="store_true",
                         help="Bootstrap sync state from current HEAD (no re-index)")
+    parser.add_argument("--bootstrap-embed", action="store_true",
+                        help="Seed embed state from current ChromaDB data (run once after full-sync)")
     args = parser.parse_args()
 
     # Determine client list
@@ -619,6 +621,35 @@ def main():
         parser.error("--repo requires --client")
     if args.branch and not args.repo:
         parser.error("--branch requires --repo")
+
+    if args.bootstrap_embed:
+        from ingest.embed_chunks import bootstrap_embed_state
+        for client in clients:
+            # Discover indexed branches from branch_index.json
+            bi_path = PROJECT_ROOT / "memory" / client / "branch_index.json"
+            indexed_branches: list[str] = []
+            if bi_path.exists():
+                try:
+                    bi = json.loads(bi_path.read_text(encoding="utf-8"))
+                    for key, info in bi.items():
+                        # Keys are "repo:branch" with info dict or flat strings
+                        branch = info.get("branch", "") if isinstance(info, dict) else ""
+                        if not branch and ":" in key:
+                            branch = key.split(":", 1)[1]
+                        if branch:
+                            indexed_branches.append(branch)
+                except (json.JSONDecodeError, OSError):
+                    pass
+            # Deduplicate
+            branch_set = sorted(set(indexed_branches)) if indexed_branches else ["main"]
+            for branch in branch_set:
+                summary = bootstrap_embed_state(client, branch)
+                total_files = sum(summary.values())
+                cols = len(summary)
+                print(f"Bootstrapped embed state for {client}/{branch}: "
+                      f"{total_files} files across {cols} collections")
+        print("\nDone. Future syncs will only re-embed changed files.")
+        sys.exit(0)
 
     if args.bootstrap:
         for client in clients:

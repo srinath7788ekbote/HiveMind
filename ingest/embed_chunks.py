@@ -12,6 +12,7 @@ import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -171,12 +172,24 @@ def _write_json_chunks(mem: Path, collection_name: str, all_chunks: list[dict]):
         json.dump(list(existing.values()), f, indent=1)
 
 
+def _embed_state_path(mem: Path, collection_name: str) -> Path:
+    """Return the path to the embed state checkpoint file."""
+    return mem / f"embed_state_{collection_name}.json"
+
+
 def _load_embed_state(mem: Path, collection_name: str) -> dict:
     """Load the mtime checkpoint for a collection. {rel_path: mtime_epoch}."""
-    state_file = mem / "vectors" / f".{collection_name}.state.json"
+    state_file = _embed_state_path(mem, collection_name)
     if state_file.exists():
         try:
             return json.loads(state_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+    # Fall back to legacy location (vectors/.name.state.json)
+    legacy = mem / "vectors" / f".{collection_name}.state.json"
+    if legacy.exists():
+        try:
+            return json.loads(legacy.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             pass
     return {}
@@ -184,9 +197,66 @@ def _load_embed_state(mem: Path, collection_name: str) -> dict:
 
 def _save_embed_state(mem: Path, collection_name: str, state: dict):
     """Persist the mtime checkpoint for a collection."""
-    state_file = mem / "vectors" / f".{collection_name}.state.json"
+    state_file = _embed_state_path(mem, collection_name)
     state_file.parent.mkdir(parents=True, exist_ok=True)
-    state_file.write_text(json.dumps(state, separators=(",", ":")), encoding="utf-8")
+    state_file.write_text(json.dumps(state, indent=1), encoding="utf-8")
+
+
+def bootstrap_embed_state(client_name: str, branch: str = "main") -> dict:
+    """
+    Creates embed state checkpoint from currently indexed ChromaDB data.
+    This seeds the baseline so future syncs only embed changed files.
+
+    Called once after a full-sync to establish the mtime checkpoint.
+    After this, make sync only re-embeds files whose mtime changed.
+
+    Returns:
+        dict mapping collection_name to file_count.
+    """
+    mem = Path(__file__).resolve().parent.parent / "memory" / client_name
+    vectors_dir = mem / "vectors"
+    if not vectors_dir.exists():
+        return {}
+
+    try:
+        import chromadb
+    except ImportError:
+        print("  ERROR: chromadb not installed", file=sys.stderr)
+        return {}
+
+    client = chromadb.PersistentClient(path=str(vectors_dir))
+    summary = {}
+
+    for col in client.list_collections():
+        name = col.name
+        # Only process collections matching this branch (or all if branch="*")
+        if branch != "*" and not name.endswith(f"_{branch}"):
+            continue
+
+        results = col.get(include=["metadatas"])
+        metadatas = results.get("metadatas", [])
+        if not metadatas:
+            continue
+
+        # Build {file_path: mtime} from metadata; use chunk_index==0 to
+        # deduplicate (one entry per file, not per chunk).
+        state: dict[str, int] = {}
+        for meta in metadatas:
+            fp = meta.get("file_path", "")
+            if not fp:
+                continue
+            # Normalise to forward slashes to match embed_repo convention
+            fp = fp.replace("\\", "/")
+            if fp not in state:
+                # No mtime stored in ChromaDB metadata — use current epoch as
+                # the baseline.  This means the *next* sync will skip these
+                # files unless they are modified after this bootstrap point.
+                state[fp] = int(time.time())
+
+        _save_embed_state(mem, name, state)
+        summary[name] = len(state)
+
+    return summary
 
 
 def embed_repo(

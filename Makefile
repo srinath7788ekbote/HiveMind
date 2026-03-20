@@ -23,6 +23,8 @@ help:
 	@echo    make full-sync           Fetch remotes + sync + ChromaDB + HTI
 	@echo    make full-sync CLIENT=xxx  Full sync for one client
 	@echo    make bootstrap-state    Seed sync baseline (fix stuck sync)
+	@echo    make bootstrap-embed             Seed embed state (run once after full-sync)
+	@echo    make bootstrap-embed CLIENT=xxx  Seed embed state for specific client
 	@echo    make chromadb           Populate ChromaDB (all clients)
 	@echo    make chromadb CLIENT=xxx Populate ChromaDB (one client)
 	@echo    make chromadb-all       Populate ChromaDB for all discovered clients
@@ -151,6 +153,17 @@ else
 	@.venv\Scripts\python scripts\sync_kb.py --bootstrap
 endif
 
+# ── bootstrap-embed ──────────────────────────────────────
+# Seed embed state from existing ChromaDB data so 'make sync' skips unchanged files.
+bootstrap-embed:
+	@echo Bootstrapping embed state from current ChromaDB data...
+ifdef CLIENT
+	@.venv\Scripts\python scripts\sync_kb.py --bootstrap-embed --client $(CLIENT)
+else
+	@.venv\Scripts\python scripts\sync_kb.py --bootstrap-embed
+endif
+	@echo Done. Future syncs will only re-embed changed files.
+
 # ── chromadb ──────────────────────────────────────────────
 chromadb:
 ifdef CLIENT
@@ -278,4 +291,4 @@ benchmark-report:
 	@echo.
 	@echo  Report saved to benchmarks\results.md
 
-.PHONY: help setup crawl-all crawl sync full-sync chromadb chromadb-all status test server add-client docs verify recall save-investigation start stop hti-migrate hti-index hti-status hti-setup benchmark benchmark-v1 benchmark-quick benchmark-report
+.PHONY: help setup crawl-all crawl sync full-sync bootstrap-embed chromadb chromadb-all status test server add-client docs verify recall save-investigation start stop hti-migrate hti-index hti-status hti-setup benchmark benchmark-v1 benchmark-quick benchmark-report
