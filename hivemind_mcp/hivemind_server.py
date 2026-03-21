@@ -48,6 +48,9 @@ from tools.check_branch import check_branch
 from tools.save_investigation import save_investigation
 from tools.recall_investigation import recall_investigation
 
+# Sync: pre-flight freshness check
+from scripts.sync_kb import check_and_sync_if_stale
+
 # HTI (Tree Intelligence) imports
 from hivemind_mcp.hti.utils import get_hti_connection
 
@@ -734,6 +737,43 @@ async def hivemind_get_active_branch() -> str:
 
 
 @mcp_server.tool()
+async def hivemind_ensure_fresh(
+    client: str,
+    repos: str = None,
+    branches: str = None,
+) -> str:
+    """Pre-flight freshness check: compare local sync state against remote HEAD.
+
+    If any branch is stale, automatically runs incremental sync before
+    returning.  Fast (~1-2s) if everything is fresh.  Safe — only reads
+    remote refs and never pushes.  Network failures are warnings, not errors.
+
+    Call this FIRST at the start of every investigation to ensure the KB
+    has the latest data.
+
+    Args:
+        client: Client name (e.g. "dfin").
+        repos: Optional comma-separated repo names to check (default: all).
+        branches: Optional comma-separated branch names to check (default: all).
+    """
+    try:
+        repo_list = [r.strip() for r in repos.split(",") if r.strip()] if repos else None
+        branch_list = [b.strip() for b in branches.split(",") if b.strip()] if branches else None
+
+        result = await _run_with_timeout(
+            check_and_sync_if_stale,
+            client=client,
+            repos=repo_list,
+            branches=branch_list,
+            auto_sync=True,
+            timeout=180,
+        )
+        return _format_result(result)
+    except Exception as e:
+        return json.dumps({"error": str(e), "message": "Freshness check failed — proceeding with cached data."})
+
+
+@mcp_server.tool()
 async def hivemind_hti_get_skeleton(
     client: str,
     repo: str = "all",
@@ -949,6 +989,7 @@ TOOL_REGISTRY = {
     "hivemind_read_file": hivemind_read_file,
     "hivemind_propose_edit": hivemind_propose_edit,
     "hivemind_check_branch": hivemind_check_branch,
+    "hivemind_ensure_fresh": hivemind_ensure_fresh,
     "hivemind_save_investigation": hivemind_save_investigation,
     "hivemind_recall_investigation": hivemind_recall_investigation,
     "hivemind_hti_get_skeleton": hivemind_hti_get_skeleton,
@@ -979,9 +1020,9 @@ def run_self_test() -> bool:
     # Verify the FastMCP server has them registered
     registered_count = len(expected_tools)
     print()
-    print(f"Tools registered: {registered_count}/20")
+    print(f"Tools registered: {registered_count}/21")
 
-    if registered_count == 20 and all_ok:
+    if registered_count == 21 and all_ok:
         print("All tools healthy.")
         return True
     else:

@@ -40,10 +40,10 @@ class TestHTIToolsRegistered(unittest.TestCase):
         from hivemind_mcp.hivemind_server import TOOL_REGISTRY
         self.assertIn("hivemind_hti_fetch_nodes", TOOL_REGISTRY)
 
-    def test_total_tool_count_is_20(self):
-        """TOOL_REGISTRY contains exactly 20 tools with HTI additions."""
+    def test_total_tool_count_is_21(self):
+        """TOOL_REGISTRY contains exactly 21 tools with HTI additions."""
         from hivemind_mcp.hivemind_server import TOOL_REGISTRY
-        self.assertEqual(len(TOOL_REGISTRY), 20)
+        self.assertEqual(len(TOOL_REGISTRY), 21)
 
     def test_hti_tools_are_callable(self):
         """Both HTI tools are callable async functions."""

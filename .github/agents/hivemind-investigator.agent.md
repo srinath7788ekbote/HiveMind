@@ -126,8 +126,10 @@ Investigator Agent
 When recommending remediation that involves file changes:
 
 - **NEVER** propose direct edits to files on `main`, `master`, `develop`, `release_*`, or `hotfix_*` branches
-- **ALWAYS** instruct to create a working branch first: `hivemind/<source-branch>-<description>`
+- **ALWAYS** instruct to create a working branch: `feat/<description>`, `fix/<description>`, `chore/<description>`, or `refactor/<description>`
+- **NEVER** use the `hivemind/*` prefix for working branches
 - **ALWAYS** recommend fixes via Pull Request to the target branch
+- **NEVER** run `git add`, `git commit`, `git push`, or `git merge` — the user does that manually
 
 ## MCP Tool Preferences
 

@@ -41,10 +41,10 @@ class TestMCPServerImports(unittest.TestCase):
         self.assertIsNotNone(mcp_server)
         self.assertEqual(mcp_server.name, "hivemind")
 
-    def test_tool_registry_has_20_tools(self):
-        """TOOL_REGISTRY contains exactly 20 tools."""
+    def test_tool_registry_has_21_tools(self):
+        """TOOL_REGISTRY contains exactly 21 tools."""
         from hivemind_mcp.hivemind_server import TOOL_REGISTRY
-        self.assertEqual(len(TOOL_REGISTRY), 20)
+        self.assertEqual(len(TOOL_REGISTRY), 21)
 
     def test_tool_registry_all_callable(self):
         """Every entry in TOOL_REGISTRY is callable."""
@@ -136,7 +136,7 @@ class TestMCPSelfTest(unittest.TestCase):
             cwd=str(PROJECT_ROOT),
             timeout=30,
         )
-        self.assertIn("20/20", result.stdout)
+        self.assertIn("21/21", result.stdout)
 
 
 class TestGetActiveClientTool(unittest.TestCase):

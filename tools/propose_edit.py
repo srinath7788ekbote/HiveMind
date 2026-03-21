@@ -160,10 +160,17 @@ def propose_edit(
         tier = bp.get_protection_tier(branch)
         result["action"] = "blocked"
         result["note"] = (
-            f"Branch '{branch}' is a {tier}-tier protected branch. "
-            f"Direct modifications are not allowed. "
-            f"Create a working branch first using: "
-            f"hivemind/<{branch}>-<description>"
+            f"Direct edits to '{branch}' are not allowed ({tier}-tier protected). "
+            f"Specify a working branch: feat/*, fix/*, chore/*, refactor/*"
+        )
+        return result
+
+    # Step 1b: Reject hivemind/* prefix (use standard naming)
+    if branch.startswith("hivemind/"):
+        result["action"] = "blocked"
+        result["note"] = (
+            "Use standard branch naming: feat/*, fix/*, chore/*, refactor/* "
+            "instead of hivemind/* prefix."
         )
         return result
 

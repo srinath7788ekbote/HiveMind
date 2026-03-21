@@ -39,6 +39,8 @@ help:
 	@echo    make verify             Run tests + KB status + ChromaDB check
 	@echo    make recall             Search past investigations
 	@echo    make save-investigation Show how to save investigations
+	@echo    make check-freshness    Check branch freshness vs remote
+	@echo    make check-freshness CLIENT=xxx  Check freshness for one client
 	@echo.
 	@echo  HTI (Structural Search):
 	@echo.
@@ -291,4 +293,17 @@ benchmark-report:
 	@echo.
 	@echo  Report saved to benchmarks\results.md
 
-.PHONY: help setup crawl-all crawl sync full-sync bootstrap-embed chromadb chromadb-all status test server add-client docs verify recall save-investigation start stop hti-migrate hti-index hti-status hti-setup benchmark benchmark-v1 benchmark-quick benchmark-report
+# ── check-freshness ──────────────────────────────────────
+check-freshness:
+	@echo Checking branch freshness...
+ifdef CLIENT
+ifdef REPO
+	@.venv\Scripts\python scripts\sync_kb.py --check-freshness --client $(CLIENT) --repo $(REPO)
+else
+	@.venv\Scripts\python scripts\sync_kb.py --check-freshness --client $(CLIENT)
+endif
+else
+	@.venv\Scripts\python scripts\sync_kb.py --check-freshness
+endif
+
+.PHONY: help setup crawl-all crawl sync full-sync bootstrap-embed chromadb chromadb-all status test server add-client docs verify recall save-investigation start stop hti-migrate hti-index hti-status hti-setup benchmark benchmark-v1 benchmark-quick benchmark-report check-freshness

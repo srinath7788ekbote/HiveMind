@@ -353,6 +353,169 @@ def show_status(clients: list[str], project_root: Path | None = None):
 # Sync -- single client
 # ---------------------------------------------------------------------------
 
+def _git_ls_remote(repo_path: str, branch: str) -> str | None:
+    """Return the remote HEAD commit hash for a branch via git ls-remote (READ-ONLY)."""
+    try:
+        result = subprocess.run(
+            ["git", "ls-remote", "origin", branch],
+            capture_output=True, text=True, cwd=repo_path, timeout=30,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            # Output format: "<hash>\trefs/heads/<branch>"
+            return result.stdout.strip().split()[0]
+    except Exception:
+        pass
+    return None
+
+
+def _git_rev_list_count(repo_path: str, local_ref: str, remote_ref: str) -> int:
+    """Count commits between local_ref and remote_ref."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-list", "--count", f"{local_ref}..{remote_ref}"],
+            capture_output=True, text=True, cwd=repo_path, timeout=15,
+        )
+        if result.returncode == 0 and result.stdout.strip().isdigit():
+            return int(result.stdout.strip())
+    except Exception:
+        pass
+    return 0
+
+
+def check_and_sync_if_stale(
+    client: str,
+    repos: list[str] | None = None,
+    branches: list[str] | None = None,
+    auto_sync: bool = True,
+    project_root: Path | None = None,
+) -> dict:
+    """
+    Pre-flight check: compare sync_state.json against remote HEAD.
+    If any branch is stale, run incremental sync automatically.
+
+    This is READ-ONLY if everything is fresh (just reads state file
+    and runs git ls-remote).  Only runs sync if stale branches found.
+
+    Args:
+        client: Client name (e.g. "dfin").
+        repos: Optional list of specific repo names to check.
+        branches: Optional list of specific branch names to check.
+        auto_sync: If True, automatically sync stale branches.
+        project_root: Override project root path.
+
+    Returns:
+        Dict with keys: all_fresh, checked, synced, errors, message.
+    """
+    root = project_root or PROJECT_ROOT
+    config_path = root / "clients" / client / "repos.yaml"
+    config = _load_config(config_path)
+    repo_list = config.get("repos", [])
+    state = _load_state(client, root)
+
+    checked = []
+    synced = []
+    errors = []
+    sync_total_time = 0.0
+
+    for repo in repo_list:
+        repo_name = repo.get("name", "unknown")
+        repo_path = repo.get("path", "")
+        repo_branches = repo.get("branches", ["main"])
+
+        # Filter repos if specified
+        if repos and repo_name not in repos:
+            continue
+
+        if not repo_path or not Path(repo_path).exists():
+            errors.append(f"Repo path not found: {repo_name} ({repo_path})")
+            continue
+
+        for branch in repo_branches:
+            # Filter branches if specified
+            if branches and branch not in branches:
+                continue
+
+            key = f"{repo_name}/{branch}"
+            local_commit = state.get(key, {}).get("commit", "")
+
+            # Step 2 — Check remote HEAD (READ-ONLY)
+            remote_commit = _git_ls_remote(repo_path, branch)
+
+            if remote_commit is None:
+                # Network issue or branch doesn't exist on remote
+                checked.append({
+                    "repo": repo_name, "branch": branch,
+                    "status": "unknown", "commits_behind": 0,
+                })
+                errors.append(f"Could not reach remote for {key} (network issue)")
+                continue
+
+            if local_commit == remote_commit:
+                checked.append({
+                    "repo": repo_name, "branch": branch,
+                    "status": "fresh", "commits_behind": 0,
+                })
+                continue
+
+            # Stale — count how far behind
+            commits_behind = _git_rev_list_count(
+                repo_path, local_commit, f"origin/{branch}"
+            ) if local_commit else 0
+
+            checked.append({
+                "repo": repo_name, "branch": branch,
+                "status": "stale", "commits_behind": commits_behind,
+            })
+
+            # Step 3 — Auto-sync stale branches
+            if auto_sync:
+                print(f"  [~] {key} is stale"
+                      f"{f' ({commits_behind} commits behind)' if commits_behind else ''}."
+                      f" Auto-syncing...")
+                t0 = time.time()
+                try:
+                    sync_client(
+                        client=client,
+                        repo_filter=repo_name,
+                        branch_filter=branch,
+                        auto_yes=True,
+                        force=False,
+                        project_root=root,
+                        fetch=True,
+                    )
+                    elapsed = time.time() - t0
+                    sync_total_time += elapsed
+                    synced.append({
+                        "repo": repo_name, "branch": branch,
+                        "duration": round(elapsed, 1),
+                    })
+                    print(f"  [✓] {key} synced in {elapsed:.0f}s")
+                except Exception as exc:
+                    elapsed = time.time() - t0
+                    errors.append(f"Sync failed for {key}: {exc}")
+                    print(f"  [X] {key} sync failed: {exc}")
+
+    all_fresh = all(c["status"] == "fresh" for c in checked)
+    stale_count = sum(1 for c in checked if c["status"] == "stale")
+
+    if all_fresh:
+        message = "All branches fresh"
+    elif synced:
+        message = f"Synced {len(synced)} stale branch(es) ({sync_total_time:.0f}s)"
+    elif stale_count > 0 and not auto_sync:
+        message = f"{stale_count} branch(es) stale (auto_sync disabled)"
+    else:
+        message = f"Checked {len(checked)} branch(es), {len(errors)} error(s)"
+
+    return {
+        "all_fresh": all_fresh,
+        "checked": checked,
+        "synced": synced,
+        "errors": errors,
+        "message": message,
+    }
+
+
 def sync_client(
     client: str,
     force: bool = False,
@@ -604,6 +767,8 @@ def main():
                         help="Bootstrap sync state from current HEAD (no re-index)")
     parser.add_argument("--bootstrap-embed", action="store_true",
                         help="Seed embed state from current ChromaDB data (run once after full-sync)")
+    parser.add_argument("--check-freshness", action="store_true",
+                        help="Check branch freshness vs remote (no sync, report only)")
     args = parser.parse_args()
 
     # Determine client list
@@ -659,6 +824,29 @@ def main():
             print(f"\n-- CLIENT: {client} " + "-" * (46 - len(client)))
             _bootstrap_state_from_branch_index(client, repos, PROJECT_ROOT)
         print("\nDone. Run 'make sync' to detect only new changes.")
+    elif args.check_freshness:
+        for client in clients:
+            print(f"\n-- FRESHNESS CHECK: {client} " + "-" * (38 - len(client)))
+            result = check_and_sync_if_stale(
+                client=client,
+                repos=[args.repo] if args.repo else None,
+                branches=[args.branch] if args.branch else None,
+                auto_sync=False,
+                project_root=PROJECT_ROOT,
+            )
+            for entry in result["checked"]:
+                key = f"{entry['repo']}/{entry['branch']}"
+                if entry["status"] == "fresh":
+                    print(f"  ✅ {key:<45} up to date")
+                elif entry["status"] == "stale":
+                    behind = entry.get("commits_behind", "?")
+                    print(f"  ⚠️  {key:<45} {behind} commits behind")
+                else:
+                    print(f"  ❓ {key:<45} unknown (network issue)")
+            if result["errors"]:
+                for err in result["errors"]:
+                    print(f"  ⚠️  {err}")
+            print(f"\n  {result['message']}")
     elif args.status:
         show_status(clients, PROJECT_ROOT)
     else:

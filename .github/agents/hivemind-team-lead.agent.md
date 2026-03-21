@@ -135,13 +135,27 @@ Before routing ANY task that involves file editing, commits, or pushes:
 
 1. **CHECK** the target branch against protected patterns: `main`, `master`, `develop`, `release_*`, `hotfix_*`
 2. **IF protected** → instruct the specialist agent to create a working branch first:
-   - Branch name: `hivemind/<source-branch>-<description>`
+   - Branch name: `feat/<description>`, `fix/<description>`, `chore/<description>`, or `refactor/<description>`
    - All edits on the working branch only
    - Create a PR to merge back into the protected branch
 3. **NEVER** approve or synthesize a response that includes direct edits to protected branches
 4. **REJECT** any agent finding that proposes direct commits to a protected branch
+5. **NEVER** use the `hivemind/*` prefix for working branches — use `feat/*`, `fix/*`, `chore/*`, `refactor/*`
+6. **NEVER** run `git add`, `git commit`, `git push`, or `git merge` — the user does that manually
 
 This applies to ALL repositories — client repos AND HiveMind itself.
+
+After proposing an edit, always show:
+```
+Branch created: fix/<description>
+File edited: <file path>
+[unified diff preview]
+
+When ready to commit:
+  git add <file path>
+  git commit -m '<type>: <description>'
+  git push origin fix/<description>
+```
 
 ## MCP Tool Preferences
 
@@ -153,6 +167,36 @@ routing to specialist agents.
 All tools are available as MCP tools — call them directly by name (e.g.
 `hivemind_query_memory(client="dfin", query="...")`).
 Do NOT use slash commands or the VS Code extension participant.
+
+## 🔄 PRE-INVESTIGATION FRESHNESS CHECK (mandatory first step)
+
+For EVERY investigation involving client repos:
+
+**STEP 1** — Call `hivemind_ensure_fresh` FIRST:
+```
+hivemind_ensure_fresh(
+  client="dfin",
+  repos="<comma-separated repos relevant to query>",
+  branches="<comma-separated branches relevant to query>"
+)
+```
+
+- If query mentions a specific repo → pass only that repo
+- If query mentions a specific branch → pass only that branch
+- If query is broad (no specific repo/branch) → omit repos/branches (checks all)
+
+**STEP 2** — Read the result:
+- If `all_fresh=true` → Proceed immediately. Note: "All branches verified fresh."
+- If synced branches exist → Note: "Auto-synced N stale branches. Investigation uses fresh data." → Proceed
+- If any errors/unknown → Note: "Could not verify freshness for some branches (network issue). Results based on last synced data." → Proceed anyway
+
+**STEP 3** — Continue with normal investigation
+
+**WHEN TO SKIP** `hivemind_ensure_fresh`:
+- User says "don't sync" or "use cached data"
+- Query is purely HTI structural (hti_get_skeleton only, no recent changes question)
+- User just ran `make sync` in this session
+- Query is about HiveMind internal files (not client repos)
 
 ## ⚠️ Branch Validation — MANDATORY PRE-FLIGHT CHECK
 

@@ -126,11 +126,13 @@ Risk Level: {LOW|MEDIUM|HIGH}
 Every runbook that involves file modifications MUST include:
 
 1. **Step 0 (MANDATORY)**: Create a working branch from the target protected branch
-   - Branch name: `hivemind/<source-branch>-<description>`
-   - Example: `mcp_github_create_branch(branch: "hivemind/main-update-config", source: "main")`
+   - Branch name: `feat/<description>`, `fix/<description>`, `chore/<description>`, or `refactor/<description>`
+   - Example: `mcp_github_create_branch(branch: "fix/update-config", source: "main")`
 2. **Final Step**: Create a Pull Request to merge the working branch into the protected branch
-   - Example: `mcp_github_create_pull_request(head: "hivemind/main-update-config", base: "main")`
+   - Example: `mcp_github_create_pull_request(head: "fix/update-config", base: "main")`
 3. **NEVER** include steps that directly edit files on `main`, `master`, `develop`, `release_*`, or `hotfix_*`
+4. **NEVER** use the `hivemind/*` prefix for working branches
+5. **NEVER** include `git add`, `git commit`, `git push`, or `git merge` in runbooks — the user does that manually
 
 ## MCP Tool Preferences
 

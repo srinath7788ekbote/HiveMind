@@ -109,11 +109,11 @@ Agents now use **phased parallel execution** with a **shared investigation regis
 
 ---
 
-## MCP Tools (16 tools)
+## MCP Tools (21 tools)
 
-All 16 HiveMind MCP tools are available via `.vscode/mcp.json`. The tools are shared between Copilot Chat and Claude Agent — no separate configuration needed. See `hivemind_mcp/hivemind_server.py` for tool definitions.
+All 21 HiveMind MCP tools are available via `.vscode/mcp.json`. The tools are shared between Copilot Chat and Claude Agent — no separate configuration needed. See `hivemind_mcp/hivemind_server.py` for tool definitions.
 
-Key tools: `hivemind_get_active_client`, `hivemind_query_memory`, `hivemind_query_graph`, `hivemind_get_entity`, `hivemind_search_files`, `hivemind_get_pipeline`, `hivemind_get_secret_flow`, `hivemind_impact_analysis`, `hivemind_diff_branches`, `hivemind_list_branches`, `hivemind_set_client`, `hivemind_write_file`, `hivemind_check_branch`, `hivemind_get_active_branch`, `hivemind_save_investigation`, `hivemind_recall_investigation`.
+Key tools: `hivemind_get_active_client`, `hivemind_query_memory`, `hivemind_query_graph`, `hivemind_get_entity`, `hivemind_search_files`, `hivemind_get_pipeline`, `hivemind_get_secret_flow`, `hivemind_impact_analysis`, `hivemind_diff_branches`, `hivemind_list_branches`, `hivemind_set_client`, `hivemind_write_file`, `hivemind_check_branch`, `hivemind_ensure_fresh`, `hivemind_get_active_branch`, `hivemind_save_investigation`, `hivemind_recall_investigation`.
 
 ---
 

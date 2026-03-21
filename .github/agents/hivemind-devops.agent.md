@@ -115,9 +115,11 @@ DevOps Agent
 When proposing changes, deployments, or file edits:
 
 - **NEVER** commit, push, or edit files directly on `main`, `master`, `develop`, `release_*`, or `hotfix_*` branches
-- **ALWAYS** create a working branch first: `hivemind/<source-branch>-<description>`
+- **ALWAYS** create a working branch: `feat/<description>`, `fix/<description>`, `chore/<description>`, or `refactor/<description>`
+- **NEVER** use the `hivemind/*` prefix for working branches
 - **ALWAYS** propose changes via Pull Request to the target branch
 - If a runbook or fix requires file edits, include "Create working branch" as Step 0
+- **NEVER** run `git add`, `git commit`, `git push`, or `git merge` — the user does that manually
 
 ## MCP Tool Preferences
 
