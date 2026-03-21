@@ -14,6 +14,7 @@ from ingest.embed_chunks import (
     _load_embed_state,
     _save_embed_state,
     _embed_state_path,
+    _normalize_path_key,
     bootstrap_embed_state,
     embed_repo,
 )
@@ -221,3 +222,65 @@ class TestEmbedIncremental:
         # State should still exist
         state = _load_embed_state(tmp_memory, "test_repo_default")
         assert len(state) == 2
+
+
+class TestPathNormalization:
+    """Verify backslash vs forward-slash keys always match."""
+
+    def test_normalize_path_key(self):
+        assert _normalize_path_key("dir\\file.yaml") == "dir/file.yaml"
+        assert _normalize_path_key("dir/file.yaml") == "dir/file.yaml"
+        assert _normalize_path_key("a\\b\\c.tf") == "a/b/c.tf"
+        assert _normalize_path_key("simple.tf") == "simple.tf"
+
+    def test_load_normalizes_backslash_keys(self, tmp_memory):
+        """State saved with backslash keys should be loadable with forward-slash lookups."""
+        # Simulate a legacy state file written with backslash keys
+        state_file = _embed_state_path(tmp_memory, "col1")
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state_file.write_text(json.dumps({
+            "layer_0\\aks.tf": 1710000000,
+            "charts\\values.yaml": 1710000001,
+        }), encoding="utf-8")
+
+        loaded = _load_embed_state(tmp_memory, "col1")
+        assert "layer_0/aks.tf" in loaded
+        assert "charts/values.yaml" in loaded
+        assert "layer_0\\aks.tf" not in loaded
+
+    def test_save_normalizes_backslash_keys(self, tmp_memory):
+        """State saved with backslash keys should be stored as forward slashes."""
+        _save_embed_state(tmp_memory, "col1", {
+            "layer_0\\aks.tf": 1710000000,
+            "charts\\values.yaml": 1710000001,
+        })
+        loaded = _load_embed_state(tmp_memory, "col1")
+        assert "layer_0/aks.tf" in loaded
+        assert "layer_0\\aks.tf" not in loaded
+
+    def test_embed_skips_with_backslash_state_keys(self, tmp_memory):
+        """embed_repo skips files even when state was saved with backslash keys."""
+        repo = tmp_memory.parent / "test_repo"
+        repo.mkdir()
+        sub = repo / "subdir"
+        sub.mkdir()
+        (sub / "main.tf").write_text("resource {}", encoding="utf-8")
+
+        mtime = int((sub / "main.tf").stat().st_mtime)
+
+        # Save state with BACKSLASH key (simulating legacy/Windows bootstrap)
+        state_file = _embed_state_path(tmp_memory, "test_repo_default")
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state_file.write_text(json.dumps({
+            "subdir\\main.tf": mtime,
+        }), encoding="utf-8")
+
+        result = embed_repo(
+            repo_path=str(repo),
+            memory_dir=str(tmp_memory),
+            branch="default",
+            collection_name="test_repo_default",
+        )
+
+        assert result["skipped_files"] == 1
+        assert result["file_count"] == 0

@@ -110,9 +110,9 @@ def _file_to_chunks(
     repo_name = Path(repo_root).name
 
     try:
-        rel_path = str(p.relative_to(repo_root))
+        rel_path = _normalize_path_key(str(p.relative_to(repo_root)))
     except ValueError:
-        rel_path = str(p)
+        rel_path = _normalize_path_key(str(p))
 
     # Classify file type from extension/path
     suffix = p.suffix.lower()
@@ -172,34 +172,51 @@ def _write_json_chunks(mem: Path, collection_name: str, all_chunks: list[dict]):
         json.dump(list(existing.values()), f, indent=1)
 
 
+def _normalize_path_key(path: str) -> str:
+    """Normalize a file path key to forward slashes for consistent state lookups."""
+    return path.replace("\\", "/")
+
+
 def _embed_state_path(mem: Path, collection_name: str) -> Path:
     """Return the path to the embed state checkpoint file."""
     return mem / f"embed_state_{collection_name}.json"
 
 
 def _load_embed_state(mem: Path, collection_name: str) -> dict:
-    """Load the mtime checkpoint for a collection. {rel_path: mtime_epoch}."""
+    """Load the mtime checkpoint for a collection. {rel_path: mtime_epoch}.
+
+    All keys are normalized to forward slashes on load so that lookups
+    from embed_repo (which also normalizes) always match, regardless of
+    how the state was originally saved.
+    """
+    raw: dict = {}
     state_file = _embed_state_path(mem, collection_name)
     if state_file.exists():
         try:
-            return json.loads(state_file.read_text(encoding="utf-8"))
+            raw = json.loads(state_file.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             pass
-    # Fall back to legacy location (vectors/.name.state.json)
-    legacy = mem / "vectors" / f".{collection_name}.state.json"
-    if legacy.exists():
-        try:
-            return json.loads(legacy.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            pass
-    return {}
+    if not raw:
+        # Fall back to legacy location (vectors/.name.state.json)
+        legacy = mem / "vectors" / f".{collection_name}.state.json"
+        if legacy.exists():
+            try:
+                raw = json.loads(legacy.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                pass
+    # Normalize all keys to forward slashes
+    return {_normalize_path_key(k): v for k, v in raw.items()}
 
 
 def _save_embed_state(mem: Path, collection_name: str, state: dict):
-    """Persist the mtime checkpoint for a collection."""
+    """Persist the mtime checkpoint for a collection.
+
+    Keys are normalized to forward slashes before writing.
+    """
+    normalized = {_normalize_path_key(k): v for k, v in state.items()}
     state_file = _embed_state_path(mem, collection_name)
     state_file.parent.mkdir(parents=True, exist_ok=True)
-    state_file.write_text(json.dumps(state, indent=1), encoding="utf-8")
+    state_file.write_text(json.dumps(normalized, indent=1), encoding="utf-8")
 
 
 def bootstrap_embed_state(client_name: str, branch: str = "main") -> dict:
@@ -245,8 +262,7 @@ def bootstrap_embed_state(client_name: str, branch: str = "main") -> dict:
             fp = meta.get("file_path", "")
             if not fp:
                 continue
-            # Normalise to forward slashes to match embed_repo convention
-            fp = fp.replace("\\", "/")
+            fp = _normalize_path_key(fp)
             if fp not in state:
                 # No mtime stored in ChromaDB metadata — use current epoch as
                 # the baseline.  This means the *next* sync will skip these
@@ -320,9 +336,9 @@ def embed_repo(
 
         # Incremental: skip files whose mtime hasn't changed
         try:
-            rel_path = str(file_path.relative_to(repo)).replace("\\", "/")
+            rel_path = _normalize_path_key(str(file_path.relative_to(repo)))
         except ValueError:
-            rel_path = str(file_path)
+            rel_path = _normalize_path_key(str(file_path))
 
         current_mtime = int(file_path.stat().st_mtime)
         prev_mtime = embed_state.get(rel_path)
