@@ -146,8 +146,10 @@ async def hivemind_query_memory(
     """Semantic search over the HiveMind knowledge base.
 
     Searches indexed infrastructure files (Terraform, pipelines, Helm, etc.)
-    for content matching the query. Returns ranked results with file paths,
-    repos, relevance scores, and pre-formatted source citations.
+    for content matching the query. Results are fused using Reciprocal Rank
+    Fusion (RRF) from both BM25 keyword search and ChromaDB semantic search.
+    The rrf_score field indicates fusion confidence (higher = more relevant
+    across both search methods).
 
     Each result includes a `source_citation` field formatted as:
         [Source: <file_path> | repo: <repo> | branch: <branch> | relevance: <score>%]
