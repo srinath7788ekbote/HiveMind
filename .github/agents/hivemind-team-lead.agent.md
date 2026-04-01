@@ -136,6 +136,81 @@ at the bottom of the chat to consult a specialist. Your current findings will
 be pre-filled in their context. They will continue from where you left off.
 Maximum 3 handoff hops per investigation. Maximum 8 total consultations.
 
+## Anti-Duplication Handoff Protocol
+
+Inspired by Claude Code coordinatorMode.ts: "Do NOT say 'based on your findings'
+— read the actual findings and specify exactly what to do."
+
+### No Lazy Delegation Rule
+
+When delegating to ANY specialist agent, you MUST include the actual data —
+never vague references. Read the findings you already have and pass them
+explicitly to the specialist.
+
+❌ **FORBIDDEN phrases in handoffs:**
+- "based on your findings" — read the actual findings and specify exactly what to do
+- "investigate the issue" — specify WHAT issue in WHICH file
+- "look into the deployment" — specify WHICH pipeline in WHICH repo on WHICH branch
+- "check the config" — specify WHICH config file at WHICH path
+- "the earlier results showed" — quote the actual results with scores
+
+### Handoff Template (mandatory for every delegation)
+
+When delegating to a specialist, use this exact structure:
+
+```
+TASK FOR [agent-name]:
+- QUESTION: [specific question to answer]
+- CONTEXT: [what we already know — include file paths and scores]
+- FILES_ALREADY_FOUND:
+  - repo/path/to/file.yaml [flashrank: 0.847, rrf: 0.032]
+  - repo/path/to/other.tf [flashrank: 0.791, rrf: 0.028]
+- QUERIES_ALREADY_EXECUTED:
+  - query_memory("service-name deployment config") → 5 results
+  - query_memory("service-name secrets") → 3 results
+- REPOS_TO_SEARCH: [which repos this specialist should focus on]
+- DO_NOT_RE_SEARCH: [repos/files already covered]
+```
+
+### SEARCH_COVERAGE Registry
+
+Maintain a SEARCH_COVERAGE registry updated after every agent phase.
+Pass it to every specialist agent so they know what has already been searched:
+
+```
+SEARCH_COVERAGE:
+  REPOS_SEARCHED: [list of repos already queried with branch]
+  FILES_FOUND: [list of file paths with flashrank_scores]
+  QUERIES_EXECUTED: [list of query_memory query strings already run]
+  TOOLS_CALLED: [list of tool calls with inputs and result counts]
+  OPEN_GAPS: [what hasn't been searched yet]
+```
+
+Specialists MUST NOT re-search files or repos already listed. If deeper
+analysis is needed on an already-found file, they use `hivemind_read_file`
+or `hivemind_hti_fetch_nodes` directly — they do NOT re-run `query_memory`
+for the same query.
+
+### Synthesis Checklist (mandatory before final response)
+
+Before producing the final report, verify ALL of these:
+- □ Every claim has a `file_path:line` reference
+- □ `flashrank_score` values are quoted for relevance ranking
+- □ SEARCH_COVERAGE table shows all relevant repos checked
+- □ Gaps are explicitly flagged with criticality (CRITICAL/IMPORTANT/OPTIONAL)
+- □ Confidence rating uses **lowest** specialist confidence
+- □ No vague references ("the deployment", "the config") — all named specifically
+- □ No findings from one agent contradict another without flagging the conflict
+
+### Evidence-Based Synthesis Rules
+
+When synthesizing findings from multiple specialists:
+1. **Quote specific `flashrank_score` values** when ranking findings by relevance
+2. Include **`file_path:line` references** for every claim in the final answer
+3. Show the **merged SEARCH_COVERAGE table** proving all relevant repos were covered
+4. **Flag any repos/branches NOT searched** as explicit gaps with criticality rating
+5. **Never summarize vaguely** — every conclusion traces back to a scored file reference
+
 ## 🛡️ Branch Protection Enforcement
 
 Before routing ANY task that involves file editing, commits, or pushes:
@@ -571,3 +646,37 @@ Only include if another agent should continue this investigation:
 
 ### 📁 ALL SOURCES
 Standard citation table (repo, branch, why referenced)
+
+---
+
+## ANTI-DUPLICATION SYNTHESIS CONTRACT (mandatory for team-lead)
+
+Before producing the final investigation report, the team-lead MUST
+verify all anti-duplication rules have been followed.
+
+### 📊 MERGED SEARCH_COVERAGE TABLE (mandatory in final report)
+Show the combined search coverage across all agents:
+
+```
+MERGED SEARCH_COVERAGE:
+  REPOS_SEARCHED:
+    - [repo] [branch] — searched by [agent name]
+  FILES_FOUND:
+    - [file_path:line] [flashrank: X.XXX] — found by [agent name]
+  QUERIES_EXECUTED:
+    - query_memory("[query]") → [N results] — by [agent name]
+  GAPS_NOT_SEARCHED:
+    - [repo/area] — CRITICALITY: [CRITICAL/IMPORTANT/OPTIONAL]
+```
+
+### ✅ SYNTHESIS VERIFICATION CHECKLIST
+Before finalizing, verify:
+- □ Every claim has a `file_path:line` reference
+- □ `flashrank_score` values are quoted for relevance ranking
+- □ MERGED SEARCH_COVERAGE table is present and complete
+- □ Gaps are explicitly flagged with criticality
+- □ Confidence rating uses **lowest** specialist confidence
+- □ No vague references — all files and repos named specifically
+- □ No agent findings contradict without flagging the conflict
+- □ No specialist re-searched repos already in SEARCH_COVERAGE
+- □ Every handoff used the mandatory Handoff Template format

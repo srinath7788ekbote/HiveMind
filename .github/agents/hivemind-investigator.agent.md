@@ -352,3 +352,34 @@ Only include if another agent should continue this investigation:
 
 ### 📁 ALL SOURCES
 Standard citation table (repo, branch, why referenced)
+
+---
+
+## ANTI-DUPLICATION OUTPUT CONTRACT (mandatory additions)
+
+In addition to the output contract above, every response MUST include
+these anti-duplication sections to prevent duplicate work across agents.
+
+### 📝 WHAT I RECEIVED (from team-lead handoff)
+State exactly what context you received before starting:
+- Files already found: [list from handoff, or "none — I am first agent"]
+- Queries already executed: [list from handoff SEARCH_COVERAGE]
+- Specific question I was asked: [exact question from handoff]
+- Repos I was told NOT to re-search: [list from DO_NOT_RE_SEARCH]
+
+### ✅ VERDICT
+One-line summary of findings.
+
+### 📄 KEY_FILES
+| file_path:line | flashrank_score | finding |
+|----------------|-----------------|----------|
+| [path:line] | [score] | [what this file shows] |
+
+### 🔍 WHAT_I_SEARCHED (new searches only)
+- Repos searched: [only repos NOT already in registry]
+- Queries executed: [only NEW query_memory calls]
+- Tools called: [tool name + input + result count]
+
+### ⏭️ WHAT_I_SKIPPED (already covered by other agents)
+- [file/repo]: already found by [agent name] in registry
+- [query]: already executed by [agent name]

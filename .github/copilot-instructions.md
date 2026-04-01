@@ -635,6 +635,95 @@ Before the final report, the analyst checks:
 
 ---
 
+## 7.6. 🔒 Agent Handoff Protocol (Anti-Duplication)
+
+Inspired by Claude Code coordinatorMode.ts anti-duplication patterns.
+These rules eliminate vague handoffs, duplicate searches, and untraceable synthesis.
+
+### Rule AH-1: No Lazy Delegation
+
+When handing off to a specialist agent, the team-lead MUST include:
+- The **exact file paths** already found (with line numbers if available)
+- The **exact search queries** already executed (query strings passed to `query_memory`)
+- The **specific `flashrank_score` and `rrf_score` values** from `query_memory` results
+- **What specific question** the specialist needs to answer
+
+❌ **FORBIDDEN phrases in handoffs:**
+- "based on your findings" — read the actual findings and specify exactly what to do
+- "investigate the issue" — specify WHAT issue in WHICH file
+- "look into the deployment" — specify WHICH pipeline in WHICH repo on WHICH branch
+- "check the config" — specify WHICH config file at WHICH path
+- "the earlier results showed" — quote the actual results with scores
+
+✅ **REQUIRED handoff format:**
+```
+TASK FOR [agent-name]:
+- QUESTION: [specific question to answer]
+- CONTEXT: [what we already know — include file paths and scores]
+- FILES_ALREADY_FOUND:
+  - repo/path/to/file.yaml [flashrank: 0.847, rrf: 0.032]
+  - repo/path/to/other.tf [flashrank: 0.791, rrf: 0.028]
+- QUERIES_ALREADY_EXECUTED:
+  - query_memory("service-name deployment config") → 5 results
+  - query_memory("service-name secrets") → 3 results
+- REPOS_TO_SEARCH: [which repos this specialist should focus on]
+- DO_NOT_RE_SEARCH: [repos/files already covered]
+```
+
+### Rule AH-2: SEARCH_COVERAGE Tracking
+
+The team-lead maintains a **SEARCH_COVERAGE** registry updated after every agent phase:
+
+```
+SEARCH_COVERAGE:
+  REPOS_SEARCHED: [list of repos already queried with branch]
+  FILES_FOUND: [list of file paths with flashrank_scores]
+  QUERIES_EXECUTED: [list of query_memory query strings already run]
+  TOOLS_CALLED: [list of tool calls with inputs and result counts]
+  OPEN_GAPS: [what hasn't been searched yet]
+```
+
+Every specialist receives this registry and **MUST NOT** re-search files
+or repos already listed. If a specialist needs deeper analysis of an
+already-found file, they use `hivemind_read_file` or `hivemind_hti_fetch_nodes`
+directly — they do NOT re-run `query_memory` for the same query.
+
+### Rule AH-3: Structured Specialist Output
+
+Every specialist agent MUST produce structured output including:
+
+| Section | Content |
+|---------|---------|
+| **VERDICT** | One-line summary of findings |
+| **KEY_FILES** | Table: `file_path:line \| flashrank_score \| finding` |
+| **CONFIDENCE** | Percentage with justification |
+| **WHAT_I_SEARCHED** | Repos and queries I executed (not already in registry) |
+| **WHAT_I_SKIPPED** | What was already covered by other agents (from registry) |
+| **OPEN_GAPS** | What I couldn't find or needs further investigation |
+| **HANDOFF** | Recommend next agent: `[name]` for `[reason]`, or `DONE` |
+
+### Rule AH-4: Evidence-Based Synthesis
+
+The team-lead synthesis MUST:
+- **Quote specific `flashrank_score` values** when ranking findings by relevance
+- Include **`file_path:line` references** for every claim in the final answer
+- Show the **merged SEARCH_COVERAGE table** proving all relevant repos were covered
+- **Flag any repos/branches NOT searched** as explicit gaps with criticality rating
+- **Never summarize vaguely** — every conclusion traces back to a scored file reference
+
+### Rule AH-5: Synthesis Checklist (mandatory before final response)
+
+Before producing the final report, team-lead verifies:
+- □ Every claim has a `file_path:line` reference
+- □ `flashrank_score` values are quoted for relevance ranking
+- □ SEARCH_COVERAGE table shows all relevant repos checked
+- □ Gaps are explicitly flagged with criticality (CRITICAL/IMPORTANT/OPTIONAL)
+- □ Confidence rating uses **lowest** specialist confidence
+- □ No vague references ("the deployment", "the config") — all named specifically
+- □ No findings from one agent contradict another without flagging the conflict
+
+---
+
 ## 8. 🚨 Automatic Incident Investigation Trigger
 
 When a user pastes logs, errors, or incident data, Copilot MUST automatically begin a full knowledge-base-driven investigation. **Do NOT wait for the user to ask.** The paste IS the request.
