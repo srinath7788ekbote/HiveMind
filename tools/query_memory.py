@@ -28,6 +28,106 @@ HIGH_RELEVANCE_THRESHOLD = 0.8   # Score (0-1) considered "high quality"
 JSON_SCORING_TIMEOUT_SECS = 30   # Hard timeout for JSON fallback scoring
 
 
+# ---------------------------------------------------------------------------
+# FlashRank cross-encoder reranker (lazy-loaded singleton)
+# ---------------------------------------------------------------------------
+_flashrank_ranker = None
+
+
+def _get_flashrank_ranker():
+    """Lazy-initialize FlashRank ranker on first use.
+
+    Uses module-level singleton to avoid reloading model per query.
+    Model downloads ~50MB on first use to ~/.cache/flashrank/
+    """
+    global _flashrank_ranker
+    if _flashrank_ranker is None:
+        try:
+            from flashrank import Ranker
+            _flashrank_ranker = Ranker(
+                model_name="ms-marco-MiniLM-L-12-v2",
+            )
+        except ImportError:
+            return None
+        except Exception:
+            return None
+    return _flashrank_ranker
+
+
+def _rerank_with_flashrank(
+    query: str,
+    results: list[dict],
+    top_n: int = 5,
+    text_field: str = "text",
+) -> list[dict]:
+    """Rerank results using FlashRank cross-encoder.
+
+    Takes RRF-fused results and reranks them by true query-document
+    relevance. Cross-encoder reads query+document together for each
+    pair, scoring actual relevance rather than embedding similarity.
+
+    Falls back to original RRF ordering if FlashRank unavailable.
+
+    Args:
+        query:      The original user query string
+        results:    List of result dicts from RRF fusion
+        top_n:      Number of results to return after reranking
+        text_field: Field containing document text for reranking
+
+    Returns:
+        Reranked list of top_n results with flashrank_score field added.
+        If FlashRank fails: returns original results[:top_n] unchanged.
+    """
+    if not results:
+        return []
+
+    ranker = _get_flashrank_ranker()
+    if ranker is None:
+        # FlashRank not available — graceful fallback to RRF ordering
+        for r in results[:top_n]:
+            r["retrieval_method"] = "hybrid_rrf_no_rerank"
+        return results[:top_n]
+
+    try:
+        from flashrank import RerankRequest
+
+        # Build FlashRank passages list
+        # FlashRank expects: [{"id": ..., "text": ..., "meta": {...}}]
+        passages = []
+        for i, result in enumerate(results):
+            text = result.get(text_field, "") or result.get("content", "")
+            if not text:
+                text = str(result.get("source_file", ""))
+            passages.append({
+                "id": i,
+                "text": text[:2000],  # cap at 2000 chars — avoids OOM
+                "meta": result,       # carry full result as metadata
+            })
+
+        if not passages:
+            return results[:top_n]
+
+        rerank_request = RerankRequest(query=query, passages=passages)
+        reranked = ranker.rerank(rerank_request)
+
+        # Rebuild results from reranked order
+        output = []
+        for item in reranked[:top_n]:
+            original_result = item.get("meta", {})
+            result = dict(original_result)
+            result["flashrank_score"] = round(float(item.get("score", 0.0)), 6)
+            result["retrieval_method"] = "hybrid_rrf_reranked"
+            output.append(result)
+
+        return output
+
+    except Exception:
+        # Any FlashRank error → fall back to RRF ordering silently
+        for r in results[:top_n]:
+            r["retrieval_method"] = "hybrid_rrf_no_rerank"
+        return results[:top_n]
+
+
 def _simple_relevance(query: str, text: str, file_path: str = "") -> float:
     """
     Compute a simple relevance score between query and text.
@@ -397,19 +497,22 @@ def query_memory(
     # ------------------------------------------------------------------
     if chroma_results and bm25_results:
         fused = _reciprocal_rank_fusion([chroma_results, bm25_results])
-        return fused[:top_k]
+        # Keep top-20 for reranker input (more candidates = better reranking)
+        rerank_candidates = fused[:20]
+        # Rerank with FlashRank cross-encoder, return top_n
+        return _rerank_with_flashrank(query, rerank_candidates, top_n=top_k)
     elif chroma_results:
         # BM25 unavailable — return ChromaDB results with RRF metadata
         for r in chroma_results:
             r["rrf_score"] = round(1.0 / (60 + chroma_results.index(r) + 1), 6)
             r["retrieval_method"] = "hybrid_rrf"
-        return chroma_results[:top_k]
+        return _rerank_with_flashrank(query, chroma_results, top_n=top_k)
     elif bm25_results:
         # ChromaDB unavailable — return BM25 results with RRF metadata
         for r in bm25_results:
             r["rrf_score"] = round(1.0 / (60 + bm25_results.index(r) + 1), 6)
             r["retrieval_method"] = "hybrid_rrf"
-        return bm25_results[:top_k]
+        return _rerank_with_flashrank(query, bm25_results, top_n=top_k)
     else:
         return []
 

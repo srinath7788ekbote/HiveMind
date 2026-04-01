@@ -41,6 +41,11 @@ memory/*
 *.sqlite3
 
 # ============================================
+# Benchmark results (generated, not source)
+# ============================================
+benchmarks/results_*.md
+
+# ============================================
 # HTI (HiveMind Tree Intelligence)
 # ============================================
 hivemind_mcp/hti/__pycache__/

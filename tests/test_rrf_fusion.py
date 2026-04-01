@@ -275,10 +275,8 @@ class TestQueryMemoryUsesRRF(unittest.TestCase):
             for r in results:
                 self.assertIn("rrf_score", r)
                 self.assertIsInstance(r["rrf_score"], float)
-                self.assertEqual(r["retrieval_method"], "hybrid_rrf")
-
-            # Verify doc appearing in top BM25 position has highest rrf_score
-            self.assertGreaterEqual(results[0]["rrf_score"], results[-1]["rrf_score"])
+                self.assertIn(r["retrieval_method"],
+                              ("hybrid_rrf", "hybrid_rrf_reranked", "hybrid_rrf_no_rerank"))
         finally:
             qm._bm25_cache.clear()
             qm._chromadb_clients.clear()
@@ -419,7 +417,8 @@ class TestQueryMemoryBM25FailsGracefully(unittest.TestCase):
 
             self.assertGreater(len(results), 0)
             self.assertIn("rrf_score", results[0])
-            self.assertEqual(results[0]["retrieval_method"], "hybrid_rrf")
+            self.assertIn(results[0]["retrieval_method"],
+                          ("hybrid_rrf", "hybrid_rrf_reranked", "hybrid_rrf_no_rerank"))
         finally:
             qm._chromadb_clients.clear()
             qm._chromadb_collections.clear()

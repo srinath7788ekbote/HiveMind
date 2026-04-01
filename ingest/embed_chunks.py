@@ -91,6 +91,9 @@ def _file_to_chunks(
     """
     Read a file and split it into chunks with metadata.
 
+    Tries structure-aware chunking first for YAML/HCL/Helm files.
+    Falls back to fixed-size chunking for all other files or on failure.
+
     Returns list of dicts with:
         id, text, metadata (file_path, repo, branch, chunk_index, file_type)
     """
@@ -106,13 +109,52 @@ def _file_to_chunks(
     if not text.strip():
         return []
 
-    chunks = _chunk_text(text, chunk_size, overlap)
     repo_name = Path(repo_root).name
 
     try:
         rel_path = _normalize_path_key(str(p.relative_to(repo_root)))
     except ValueError:
         rel_path = _normalize_path_key(str(p))
+
+    # Try structural chunking first for supported file types
+    try:
+        from ingest.chunkers.structural_chunker import chunk_structured_file
+        structural_chunks = chunk_structured_file(
+            content=text,
+            file_path=str(p),
+            max_chunk_chars=3000,
+        )
+    except Exception:
+        structural_chunks = None
+
+    if structural_chunks:
+        results = []
+        for i, chunk in enumerate(structural_chunks):
+            chunk_id = _compute_chunk_id(rel_path, i, branch)
+            # Merge standard metadata with structural metadata
+            meta = {
+                "file_path": rel_path,
+                "repo": repo_name,
+                "branch": branch,
+                "chunk_index": i,
+                "file_type": chunk["metadata"].get("chunk_type", "unknown"),
+                "total_chunks": len(structural_chunks),
+            }
+            # Carry over structural metadata fields
+            for key in ("chunk_type", "stage_name", "stage_index",
+                        "block_type", "block_name", "section_key",
+                        "chunking_strategy"):
+                if key in chunk["metadata"]:
+                    meta[key] = chunk["metadata"][key]
+            results.append({
+                "id": chunk_id,
+                "text": chunk["text"],
+                "metadata": meta,
+            })
+        return results
+
+    # Fall back to existing fixed-size chunking for all other files
+    chunks = _chunk_text(text, chunk_size, overlap)
 
     # Classify file type from extension/path
     suffix = p.suffix.lower()

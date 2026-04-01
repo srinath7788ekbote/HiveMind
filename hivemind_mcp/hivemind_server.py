@@ -146,10 +146,20 @@ async def hivemind_query_memory(
     """Semantic search over the HiveMind knowledge base.
 
     Searches indexed infrastructure files (Terraform, pipelines, Helm, etc.)
-    for content matching the query. Results are fused using Reciprocal Rank
-    Fusion (RRF) from both BM25 keyword search and ChromaDB semantic search.
-    The rrf_score field indicates fusion confidence (higher = more relevant
-    across both search methods).
+    for content matching the query.
+
+    Results use a 3-stage hybrid retrieval pipeline:
+      Stage 1: ChromaDB semantic search + BM25 keyword search (top-20 each)
+      Stage 2: Reciprocal Rank Fusion (RRF, k=60) merges both into top-20
+      Stage 3: FlashRank cross-encoder reranks top-20 → returns top-N
+
+    Result fields:
+    - rrf_score:       fusion confidence from RRF (higher = ranked high
+                       in both BM25 and ChromaDB)
+    - flashrank_score: reranker relevance score (higher = more relevant
+                       to the specific query)
+    - retrieval_method: 'hybrid_rrf_reranked' (normal) or
+                        'hybrid_rrf_no_rerank' (FlashRank unavailable)
 
     Each result includes a `source_citation` field formatted as:
         [Source: <file_path> | repo: <repo> | branch: <branch> | relevance: <score>%]
