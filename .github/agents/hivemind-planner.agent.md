@@ -95,22 +95,29 @@ Dependency order -> Layer-by-layer apply -> Service-by-service deploy -> Full sm
 ### Artifact Promotion
 Build verify -> Staging deploy -> Integration test -> Approval -> Prod deploy -> Canary check
 
+## Citation Format
+
+Always cite files using `repo/path/to/file.ext:L<line>` format.
+This is clickable in VS Code and lets the user jump directly to the source.
+Never reference files by name alone without the full path.
+When line numbers are unavailable, use `repo/path/to/file.ext` (no line suffix).
+
 ## Response Format
 
 ```
 Planner Agent -- Runbook: {title}
 
 Prerequisites:
-  - [ ] {prerequisite with file reference}
+  - [ ] {prerequisite with file reference `repo/path/to/file.ext:L<line>`}
 
 Steps:
   1. {step description}
-     File: {file path to modify}
+     File: `repo/path/to/file.ext:L<line>`
      Verify: {how to verify this step succeeded}
      Rollback: {how to undo if failed}
 
   2. {step description}
-     File: {file path}
+     File: `repo/path/to/file.ext:L<line>`
      Verify: {verification}
      Rollback: {rollback}
 

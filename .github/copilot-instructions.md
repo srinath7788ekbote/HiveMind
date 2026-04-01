@@ -93,6 +93,30 @@ sources table listing ALL files cited by ALL agents:
 
 ---
 
+## 1.2. 📍 FILE REFERENCE FORMAT — MANDATORY, NO EXCEPTIONS
+
+When referencing specific files, configs, or code found via MCP tools, ALWAYS
+use the pattern `repo/path/to/file.ext:L<line>` to enable VS Code click-to-open
+navigation.
+
+Examples:
+  - GOOD: "The approval gate is defined in `dfin-harness/pipelines/deploy-prod.yaml:L87`"
+  - GOOD: "Variable declared in `dfin-terraform/modules/network/main.tf:L42`"
+  - GOOD: "Secret referenced in `dfin-helm/values/production.yaml:L156`"
+  - BAD:  "Found in deploy-prod.yaml, the approval gate..."
+  - BAD:  "The network module has this variable..."
+
+For HTI structural results, use the node path as a comment:
+  - "`dfin-harness/pipelines/deploy.yaml:L87` (HTI: root.pipeline.stages[3].spec.execution)"
+
+When exact line numbers are unavailable (e.g., BM25 results without line metadata),
+use the file path without line number: `repo/path/to/file.ext`
+
+This rule applies to ALL agents. Every file reference in every response MUST
+use this format.
+
+---
+
 ## 1.5. 🛡️ BRANCH PROTECTION — MANDATORY, NO EXCEPTIONS
 
 These rules prevent direct modifications to protected branches in ANY repository (client repos AND HiveMind itself).

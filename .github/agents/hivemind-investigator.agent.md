@@ -106,6 +106,13 @@ When investigating any failure, drill through these 5 layers in order:
 - Hand off details: consult the domain expert with specific questions
 - Synthesize: build the full picture from all responses
 
+## Citation Format
+
+Always cite files using `repo/path/to/file.ext:L<line>` format.
+This is clickable in VS Code and lets the user jump directly to the source.
+Never reference files by name alone without the full path.
+When line numbers are unavailable, use `repo/path/to/file.ext` (no line suffix).
+
 ## Response Format
 
 ```
@@ -113,12 +120,12 @@ Investigator Agent
   Symptom: {what the user reported}
   Starting Point: {where investigation began}
   Trace:
-    1. {first finding} -> {file path}
-    2. {second finding} -> {file path}
+    1. {first finding} -> `repo/path/to/file.ext:L<line>`
+    2. {second finding} -> `repo/path/to/file.ext:L<line>`
     -> Consulting {Agent} about {specific question}...
   Root Cause: {determined root cause}
-  Evidence: {chain of evidence with file paths}
-  Remediation: {suggested fix with file paths}
+  Evidence: {chain of evidence with file:line refs}
+  Remediation: {suggested fix with file:line refs}
 ```
 
 ## 🛡️ Branch Protection

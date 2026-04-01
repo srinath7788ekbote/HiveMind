@@ -15,6 +15,22 @@ from pathlib import Path
 from typing import Optional
 
 
+def _char_offset_to_line(content: str, offset: int) -> int:
+    """Convert a character offset to a 1-based line number."""
+    return content[:offset].count('\n') + 1
+
+
+def _find_line_for_pattern(content: str, pattern: str) -> int | None:
+    """Find the 1-based line number of the first occurrence of pattern in content.
+
+    Returns None if pattern is not found.
+    """
+    idx = content.find(pattern)
+    if idx < 0:
+        return None
+    return _char_offset_to_line(content, idx)
+
+
 def _try_import_ruamel():
     """Import ruamel.yaml, return (YAML class, True) or (None, False)."""
     try:
@@ -116,6 +132,9 @@ def _chunk_harness_yaml_parsed(
         stage_yaml = _yaml_dump_to_str(YAML, stage_entry)
         header = f"# File: {file_path}\n# Stage: {stage_name}\n\n"
 
+        # Compute line_start by searching for the stage name in original content
+        line_start = _find_line_for_pattern(content, str(stage_name))
+
         if len(stage_yaml) <= max_chunk_chars:
             chunks.append({
                 "text": header + stage_yaml,
@@ -125,6 +144,7 @@ def _chunk_harness_yaml_parsed(
                     "stage_index": idx,
                     "source_file": file_path,
                     "chunking_strategy": "structural_harness",
+                    "line_start": line_start,
                 },
             })
         else:
@@ -144,6 +164,7 @@ def _chunk_harness_yaml_parsed(
                         "stage_index": idx,
                         "source_file": file_path,
                         "chunking_strategy": "structural_harness",
+                        "line_start": line_start,
                     },
                 })
 
@@ -194,6 +215,7 @@ def _split_large_stage(
                     "stage_index": stage_index,
                     "source_file": file_path,
                     "chunking_strategy": "structural_harness",
+                    "line_start": None,
                 },
             })
             current_steps = []
@@ -214,6 +236,7 @@ def _split_large_stage(
                 "stage_index": stage_index,
                 "source_file": file_path,
                 "chunking_strategy": "structural_harness",
+                "line_start": None,
             },
         })
 
@@ -247,6 +270,7 @@ def _chunk_harness_yaml_regex(
         name_match = re.search(r'name:\s*(.+)', stage_text)
         stage_name = name_match.group(1).strip().strip('"\'') if name_match else f"stage_{idx}"
 
+        line_start = _char_offset_to_line(content, start)
         header = f"# File: {file_path}\n# Stage: {stage_name}\n\n"
         chunks.append({
             "text": header + stage_text,
@@ -256,6 +280,7 @@ def _chunk_harness_yaml_regex(
                 "stage_index": idx,
                 "source_file": file_path,
                 "chunking_strategy": "structural_harness",
+                "line_start": line_start,
             },
         })
 
@@ -322,6 +347,7 @@ def _chunk_terraform_parsed(
         combined_text = "\n\n".join(t for t, _ in group_buffer)
         # Use first block's name as representative
         first_name = group_buffer[0][1]
+        line_start = _find_line_for_pattern(content, first_name)
         header = f"# File: {file_path}\n# Block: variables/outputs ({len(group_buffer)} blocks)\n\n"
         chunks.append({
             "text": header + combined_text,
@@ -331,6 +357,7 @@ def _chunk_terraform_parsed(
                 "block_name": first_name,
                 "source_file": file_path,
                 "chunking_strategy": "structural_terraform",
+                "line_start": line_start,
             },
         })
         group_buffer = []
@@ -360,6 +387,7 @@ def _chunk_terraform_parsed(
                         for inst_name in instances:
                             full_name = f"{type_name}.{inst_name}"
                             block_text = _hcl_block_to_text(block_type, type_name, inst_name, instances[inst_name])
+                            line_start = _find_line_for_pattern(content, inst_name)
                             header = f"# File: {file_path}\n# Block: {block_type} {full_name}\n\n"
                             chunks.append({
                                 "text": header + block_text,
@@ -369,6 +397,7 @@ def _chunk_terraform_parsed(
                                     "block_name": full_name,
                                     "source_file": file_path,
                                     "chunking_strategy": "structural_terraform",
+                                    "line_start": line_start,
                                 },
                             })
                     else:
@@ -389,6 +418,7 @@ def _chunk_terraform_parsed(
                                     "block_name": type_name,
                                     "source_file": file_path,
                                     "chunking_strategy": "structural_terraform",
+                                    "line_start": _find_line_for_pattern(content, type_name),
                                 },
                             })
             elif block_type in groupable_types:
@@ -411,6 +441,7 @@ def _chunk_terraform_parsed(
                             "block_name": name,
                             "source_file": file_path,
                             "chunking_strategy": "structural_terraform",
+                            "line_start": _find_line_for_pattern(content, name),
                         },
                     })
 
@@ -474,15 +505,18 @@ def _chunk_terraform_regex(
         if not group_buffer:
             return
         combined = "\n\n".join(t for t, _ in group_buffer)
+        first_name = group_buffer[0][1]
+        line_start = _find_line_for_pattern(content, first_name)
         header = f"# File: {file_path}\n# Block: variables/outputs ({len(group_buffer)} blocks)\n\n"
         chunks.append({
             "text": header + combined,
             "metadata": {
                 "chunk_type": "terraform_block",
                 "block_type": "variable_group",
-                "block_name": group_buffer[0][1],
+                "block_name": first_name,
                 "source_file": file_path,
                 "chunking_strategy": "structural_terraform",
+                "line_start": line_start,
             },
         })
         group_buffer = []
@@ -500,6 +534,8 @@ def _chunk_terraform_regex(
         if len(parts) > 2:
             block_name += "." + parts[2].strip('"')
 
+        line_start = _char_offset_to_line(content, start)
+
         if block_type in groupable_types:
             if group_size + len(block_text) > max_chunk_chars:
                 _flush_group()
@@ -516,6 +552,7 @@ def _chunk_terraform_regex(
                     "block_name": block_name,
                     "source_file": file_path,
                     "chunking_strategy": "structural_terraform",
+                    "line_start": line_start,
                 },
             })
 
@@ -558,6 +595,7 @@ def chunk_helm_values(
         if isinstance(value, (dict, list)):
             section_yaml = _yaml_dump_to_str(YAML, {key: value})
             header = f"# File: {file_path}\n# Section: {key}\n\n"
+            line_start = _find_line_for_pattern(content, str(key) + ":")
 
             if len(section_yaml) <= max_chunk_chars:
                 chunks.append({
@@ -567,12 +605,13 @@ def chunk_helm_values(
                         "section_key": str(key),
                         "source_file": file_path,
                         "chunking_strategy": "structural_helm",
+                        "line_start": line_start,
                     },
                 })
             else:
                 # Split at second-level keys
                 sub_chunks = _split_large_helm_section(
-                    key, value, file_path, max_chunk_chars, YAML
+                    key, value, file_path, content, max_chunk_chars, YAML
                 )
                 if sub_chunks:
                     chunks.extend(sub_chunks)
@@ -584,6 +623,7 @@ def chunk_helm_values(
                             "section_key": str(key),
                             "source_file": file_path,
                             "chunking_strategy": "structural_helm",
+                            "line_start": line_start,
                         },
                     })
         else:
@@ -600,6 +640,7 @@ def chunk_helm_values(
                 "section_key": "root_scalars",
                 "source_file": file_path,
                 "chunking_strategy": "structural_helm",
+                "line_start": 1,
             },
         })
 
@@ -610,6 +651,7 @@ def _split_large_helm_section(
     parent_key: str,
     value: dict,
     file_path: str,
+    content: str,
     max_chunk_chars: int,
     yaml_cls,
 ) -> list[dict]:
@@ -621,6 +663,7 @@ def _split_large_helm_section(
     for sub_key, sub_val in value.items():
         sub_yaml = _yaml_dump_to_str(yaml_cls, {parent_key: {sub_key: sub_val}})
         header = f"# File: {file_path}\n# Section: {parent_key}.{sub_key}\n\n"
+        line_start = _find_line_for_pattern(content, str(sub_key) + ":")
         chunks.append({
             "text": header + sub_yaml,
             "metadata": {
@@ -628,6 +671,7 @@ def _split_large_helm_section(
                 "section_key": f"{parent_key}.{sub_key}",
                 "source_file": file_path,
                 "chunking_strategy": "structural_helm",
+                "line_start": line_start,
             },
         })
 
@@ -682,6 +726,7 @@ def chunk_generic_yaml(
                         "section_key": "grouped_keys",
                         "source_file": file_path,
                         "chunking_strategy": "structural_yaml",
+                        "line_start": None,
                     },
                 })
                 small_buffer = []
@@ -698,11 +743,13 @@ def chunk_generic_yaml(
                     "section_key": "grouped_keys",
                     "source_file": file_path,
                     "chunking_strategy": "structural_yaml",
+                    "line_start": None,
                 },
             })
             small_buffer = []
             small_size = 0
 
+        line_start = _find_line_for_pattern(content, str(key) + ":")
         header = f"# File: {file_path}\n# Section: {key}\n\n"
         chunks.append({
             "text": header + section_yaml,
@@ -711,6 +758,7 @@ def chunk_generic_yaml(
                 "section_key": str(key),
                 "source_file": file_path,
                 "chunking_strategy": "structural_yaml",
+                "line_start": line_start,
             },
         })
 
@@ -724,6 +772,7 @@ def chunk_generic_yaml(
                 "section_key": "grouped_keys",
                 "source_file": file_path,
                 "chunking_strategy": "structural_yaml",
+                "line_start": None,
             },
         })
 

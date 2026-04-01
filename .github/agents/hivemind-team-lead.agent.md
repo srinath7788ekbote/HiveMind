@@ -113,6 +113,13 @@ Combined Answer
 - If parallel agents discover the same root cause -> merge into single finding
 - If they find independent issues -> present as numbered list
 
+## Citation Format
+
+Always cite files using `repo/path/to/file.ext:L<line>` format.
+This is clickable in VS Code and lets the user jump directly to the source.
+Never reference files by name alone without the full path.
+When line numbers are unavailable, use `repo/path/to/file.ext` (no line suffix).
+
 ## Synthesis Rules
 
 1. Combine findings from all agents into a coherent narrative

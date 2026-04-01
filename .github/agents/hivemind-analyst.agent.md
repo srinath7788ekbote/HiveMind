@@ -78,6 +78,13 @@ Each hop increases risk. A depth-3 impact on a production entity is CRITICAL reg
 |-------|------|
 | **All agents** | Impact analysis spans multiple domains. Consult when a dependent entity needs domain-specific analysis (e.g., consult DevOps to understand pipeline impact, Security to understand permission impact). |
 
+## Citation Format
+
+Always cite files using `repo/path/to/file.ext:L<line>` format.
+This is clickable in VS Code and lets the user jump directly to the source.
+Never reference files by name alone without the full path.
+When line numbers are unavailable, use `repo/path/to/file.ext` (no line suffix).
+
 ## Response Format
 
 ```
@@ -86,9 +93,9 @@ Analyst Agent
   Type: {entity type}
   Risk Level: {LOW|MEDIUM|HIGH|CRITICAL}
   Direct Dependents ({count}):
-    - {dependent_name} ({type}) -> {file path}
+    - {dependent_name} ({type}) -> `repo/path/to/file.ext:L<line>`
   Transitive Dependents ({count}):
-    - {dependent_name} ({type}) -> {file path}
+    - {dependent_name} ({type}) -> `repo/path/to/file.ext:L<line>`
   Impact Summary: {narrative description of impact}
 ```
 

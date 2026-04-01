@@ -143,7 +143,7 @@ def _file_to_chunks(
             # Carry over structural metadata fields
             for key in ("chunk_type", "stage_name", "stage_index",
                         "block_type", "block_name", "section_key",
-                        "chunking_strategy"):
+                        "chunking_strategy", "line_start"):
                 if key in chunk["metadata"]:
                     meta[key] = chunk["metadata"][key]
             results.append({

@@ -422,6 +422,7 @@ def query_memory(
                             fp = meta.get("file_path", "")
                             rp = meta.get("repo", "")
                             br = meta.get("branch", "default")
+                            ls = meta.get("line_start")
                             hits.append({
                                 "text": doc,
                                 "file_path": fp,
@@ -431,6 +432,7 @@ def query_memory(
                                 "relevance_pct": round(rel * 100, 1),
                                 "chunk_index": meta.get("chunk_index", 0),
                                 "file_type": meta.get("file_type", "unknown"),
+                                "line_start": int(ls) if ls is not None else None,
                                 "source_citation": f"[Source: {fp} | repo: {rp} | branch: {br} | relevance: {round(rel * 100, 1)}%]",
                             })
                     return hits
@@ -479,6 +481,7 @@ def query_memory(
                 fp = meta.get("file_path", "")
                 rp = meta.get("repo", "")
                 br = meta.get("branch", "default")
+                ls = meta.get("line_start")
                 rel_pct = round((score / max_score) * 100, 1) if max_score > 0 else 0
                 bm25_results.append({
                     "text": chunk.get("text", ""),
@@ -489,6 +492,7 @@ def query_memory(
                     "relevance_pct": rel_pct,
                     "chunk_index": meta.get("chunk_index", 0),
                     "file_type": meta.get("file_type", "unknown"),
+                    "line_start": int(ls) if ls is not None else None,
                     "source_citation": f"[Source: {fp} | repo: {rp} | branch: {br} | relevance: {rel_pct}%]",
                 })
 
@@ -547,6 +551,8 @@ def main():
         print(f"--- Result {i} (relevance: {r['relevance_pct']}%) ---")
         print(f"File: {r['file_path']}")
         print(f"Repo: {r['repo']} | Branch: {r['branch']} | Type: {r['file_type']}")
+        line_start = r.get('line_start')
+        print(f"Line Start: {line_start}")
         print(f"Text: {r['text'][:200]}...")
         print()
 

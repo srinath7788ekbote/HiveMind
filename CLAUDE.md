@@ -138,6 +138,15 @@ Key tools: `hivemind_get_active_client`, `hivemind_query_memory`, `hivemind_quer
 
 ***
 
+## File Reference Format
+
+All file citations must use `repo/path/to/file.ext:L<line>` for VS Code
+click-to-open navigation. When line numbers are unavailable, use path only:
+`repo/path/to/file.ext`. See `.github/copilot-instructions.md` section 1.2
+for full rules.
+
+***
+
 ## HTI — Structural Retrieval
 
 Two tools for precise YAML/HCL navigation:
