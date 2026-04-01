@@ -2,6 +2,26 @@
 
 HiveMind is a local-first SRE knowledge assistant that indexes infrastructure repos (Terraform, Harness pipelines, Helm charts, Kubernetes secrets) into a ChromaDB-backed knowledge base, then exposes 21 MCP tools for semantic search, dependency graph traversal, impact analysis, secret lifecycle tracing, and incident investigation across multi-repo, multi-branch client environments.
 
+### Retrieval Pipeline
+
+`query_memory` uses a 3-stage hybrid retrieval pipeline:
+1. **ChromaDB** semantic search (top-20) + **BM25** keyword search (top-20)
+2. **Reciprocal Rank Fusion** (RRF, k=60) merges both result sets
+3. **FlashRank** cross-encoder (ms-marco-MiniLM-L-12-v2, ONNX, CPU-only) reranks fused results to return top-N
+
+Result fields: `rrf_score` (fusion confidence), `flashrank_score` (cross-encoder relevance — most important), `retrieval_method` (`hybrid_rrf_reranked` or `hybrid_rrf_no_rerank`).
+
+### Structural Chunking
+
+YAML and HCL files are chunked by structural boundaries via `ingest/chunkers/structural_chunker.py`:
+- `.tf`/`.tfvars` → one chunk per resource/variable block
+- Harness pipeline YAML → one chunk per pipeline stage
+- `values.yaml` → one chunk per top-level service section
+- Other YAML → one chunk per top-level key
+- All other files → fixed-size chunking (fallback)
+
+Dependency: `flashrank>=0.2.9` (lazy-loaded singleton, ~50MB model downloaded on first use).
+
 ***
 
 ## Claude Agent Capabilities
@@ -120,12 +140,14 @@ Key tools: `hivemind_get_active_client`, `hivemind_query_memory`, `hivemind_quer
 
 ## HTI — Structural Retrieval
 
-Two new tools for precise YAML/HCL navigation:
+Two tools for precise YAML/HCL navigation:
 
 * `hivemind_hti_get_skeleton` → returns file skeleton (keys + paths, no values)
 * `hivemind_hti_fetch_nodes` → fetches full content at specific node paths
 
 Use these for any structural query (specific stages, configs, variables, specs). See `.github/copilot-instructions.md` for full routing rules.
+
+Note: HTI provides exact structural lookups from the parsed YAML/HCL tree. For broad semantic search, use `query_memory` which returns results with `rrf_score` and `flashrank_score` from the 3-stage retrieval pipeline.
 
 Claude Agent advantage: can iterate — if first `node_paths` are wrong, call `fetch_nodes` again with corrected paths. The skeleton stays in context.
 

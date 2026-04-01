@@ -48,7 +48,7 @@ You are the **Security Agent** -- specialist in RBAC, managed identities, Key Va
 | `get_secret_flow` | To trace a service's full secret chain (KV -> K8s -> Helm) |
 | `query_graph` | To find identity -> role assignment -> resource relationships |
 | `search_files` | To find RBAC-related .tf files or secret definitions |
-| `query_memory` | To search indexed content about identities, roles, secrets |
+| `query_memory` | To search indexed content about identities, roles, secrets. Results are fused from BM25+ChromaDB via RRF, then reranked by FlashRank. Higher `flashrank_score` = more relevant to your query |
 | `get_entity` | To get details of a managed identity or role assignment entity |
 | `impact_analysis` | To find what depends on a secret or identity |
 

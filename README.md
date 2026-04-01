@@ -2,7 +2,7 @@
 
 A local-first SRE knowledge assistant powered by GitHub Copilot Chat and Claude Agent. Index your infrastructure repos (Terraform, Harness, Helm, NewRelic) and query them through 7 specialist AI agents, 21 MCP tools, and 17 skills — no external APIs, no cloud dependencies, zero data leaving your machine.
 
-HiveMind uses a dual retrieval system: ChromaDB/BM25 for broad semantic search, and HTI (HiveMind Tree Intelligence) for precise structural navigation of YAML/HCL files — delivering 88-95% accuracy on structural queries about pipeline stages, Terraform modules, and Helm configurations.
+HiveMind uses a 3-stage hybrid retrieval pipeline — ChromaDB semantic search + BM25 keyword search (top-20 each), merged via Reciprocal Rank Fusion (RRF, k=60), then reranked by a FlashRank cross-encoder — plus HTI (HiveMind Tree Intelligence) for precise structural navigation of YAML/HCL files. YAML and HCL files are chunked by structural boundaries (pipeline stages, Terraform resource blocks, Helm service sections) for coherent retrieval. Benchmark: 90/90 (100%) accuracy on hard infrastructure questions.
 
 Works with any client — multi-tenant architecture discovers and indexes all configured clients automatically.
 
@@ -59,13 +59,23 @@ Works with any client — multi-tenant architecture discovers and indexes all co
 
 ### Retrieval System
 
-HiveMind uses three complementary retrieval paths:
+HiveMind uses a 3-stage hybrid retrieval pipeline for `query_memory`, plus HTI for structural navigation:
 
-| Query Type           | Tool                                                     | Speed     | Best For                       |
-| -------------------- | -------------------------------------------------------- | --------- | ------------------------------ |
-| Keyword search       | `query_memory` (BM25, built at runtime from JSON chunks) | \~350ms   | Exact matches across all repos |
-| Semantic search      | `query_memory` (ChromaDB vectors)                        | \~370ms   | Synonyms and related concepts  |
-| Structural precision | `hti_get_skeleton` + `hti_fetch_nodes`                   | \~instant | Exact YAML/HCL navigation      |
+| Stage | What Happens                                                        | Speed     |
+| ----- | ------------------------------------------------------------------- | --------- |
+| 1     | ChromaDB semantic search (top-20) + BM25 keyword search (top-20)    | \~350ms   |
+| 2     | Reciprocal Rank Fusion (RRF, k=60) merges both result sets          | \~1ms     |
+| 3     | FlashRank cross-encoder reranks fused results → returns top-N       | \~100ms   |
+
+Result fields: `rrf_score` (fusion confidence — high when both methods agree), `flashrank_score` (cross-encoder relevance — most important for query-specific ranking), `retrieval_method` (`hybrid_rrf_reranked` or `hybrid_rrf_no_rerank` if FlashRank is unavailable).
+
+YAML and HCL files are chunked by structural boundaries (pipeline stages, Terraform resource blocks, Helm service sections) via `ingest/chunkers/structural_chunker.py`, so retrieval returns complete coherent units instead of arbitrary character slices.
+
+For precise structural navigation, HTI provides exact YAML/HCL path-based lookups:
+
+| Query Type           | Tool                                       | Best For                       |
+| -------------------- | ------------------------------------------ | ------------------------------ |
+| Structural precision | `hti_get_skeleton` + `hti_fetch_nodes`     | Exact YAML/HCL navigation      |
 
 **Example:** "What are the steps in the Deploy stage?"
 → HTI navigates to `root.pipeline.stages[3].spec.execution`
@@ -231,7 +241,7 @@ HiveMind/
 │       ├── schema.sql              #   HTI table definitions
 │       └── utils.py                #   DB connection + file type detection
 ├── tools/                          # Python tools (called by MCP server)
-│   ├── query_memory.py             #   Semantic search (ChromaDB/BM25)
+│   ├── query_memory.py             #   3-stage hybrid retrieval (ChromaDB/BM25 → RRF → FlashRank)
 │   ├── query_graph.py              #   Graph traversal (SQLite)
 │   ├── get_entity.py               #   Entity lookup
 │   ├── search_files.py             #   File search
@@ -254,6 +264,9 @@ HiveMind/
 │   ├── embed_chunks.py             #   Chunk embedding
 │   ├── branch_indexer.py           #   Branch tier tracking
 │   ├── fast_embed.py               #   ONNX embedding function
+│   ├── chunkers/                   #   Structural chunking
+│   │   ├── __init__.py
+│   │   └── structural_chunker.py   #   YAML/HCL/Helm structure-aware chunking
 │   └── discovery/                  #   Auto-discovery modules
 ├── scripts/                        # Operational scripts
 │   ├── sync_kb.py                  #   Incremental sync (multi-client + HTI)
@@ -267,7 +280,7 @@ HiveMind/
 │   ├── branch_protection.py        #   Branch protection engine
 │   ├── incremental_sync.py         #   Incremental re-indexing
 │   └── git_utils.py                #   Git operations
-├── tests/                          # Test suite (814+ tests)
+├── tests/                          # Test suite (874+ tests)
 ├── benchmarks/                     # Automated KB benchmark suite
 │   ├── run_benchmark.py            #   CLI entry point (--version v1/v2)
 │   ├── runner.py                   #   Tool execution engine
@@ -297,7 +310,7 @@ HiveMind/
 | `make chromadb CLIENT=xxx`     | Populate ChromaDB — one client                             |
 | `make chromadb-all`            | Populate ChromaDB for all discovered clients               |
 | `make status`                  | Show sync status for all repos and branches                |
-| `make test`                    | Run all 814+ tests                                         |
+| `make test`                    | Run all 874+ tests                                         |
 | `make server`                  | Start MCP server (Copilot/Claude connects to this)         |
 | `make start`                   | Start HiveMind background watcher daemon                   |
 | `make stop`                    | Stop HiveMind background watcher daemon                    |
@@ -324,15 +337,17 @@ HiveMind/
 
 ## Performance
 
-| Metric                 | Value                                      |
-| ---------------------- | ------------------------------------------ |
-| Query time (BM25)      | \~350ms                                    |
-| Query time (ChromaDB)  | \~370ms                                    |
-| HTI structural queries | 88-95% accuracy on pipeline/Terraform/Helm |
-| HTI index size         | \~140K nodes for 7 repos                   |
-| Full crawl             | \~2 hours                                  |
-| Incremental sync       | \~5 minutes                                |
-| Test suite             | 814+ tests                                 |
+| Metric                    | Value                                      |
+| ------------------------- | ------------------------------------------ |
+| 3-stage hybrid retrieval  | \~500ms (ChromaDB + BM25 → RRF → FlashRank) |
+| First query (model load)  | \~2-5s (FlashRank model loads once, then cached) |
+| HTI structural queries    | 88-95% accuracy on pipeline/Terraform/Helm |
+| HTI index size            | \~140K nodes for 7 repos                   |
+| Benchmark (v2, 30 hard)   | 90/90 (100%)                               |
+| Full crawl                | \~2 hours                                  |
+| Incremental sync          | \~5 minutes                                |
+| Test suite                | 874+ tests                                 |
+| Structural chunking       | Harness pipeline: 251 fixed-size chunks → 6 stage chunks |
 
 ***
 
@@ -346,6 +361,7 @@ HiveMind/
 | `ModuleNotFoundError`         | Run `make setup` to install dependencies                                |
 | ChromaDB import error         | Use Python 3.12 or 3.13 (not 3.14+)                                     |
 | HTI not returning results     | Run `make hti-setup CLIENT=<client>`                                    |
+| First query slow (~2-5s)      | Normal — FlashRank model loads on first query, then cached              |
 
 ***
 
@@ -369,7 +385,7 @@ Optional (graceful fallbacks exist):
 3. **Multi-tenant** — Any number of clients, dynamically discovered
 4. **Branch-aware** — All queries respect branch context and tier classification
 5. **Branch-protected** — Protected branches require working branch + PR
-6. **Dual retrieval** — ChromaDB/BM25 for broad search, HTI for structural precision
+6. **3-stage hybrid retrieval** — ChromaDB+BM25 → RRF fusion → FlashRank reranking, plus HTI for structural precision
 7. **Graceful degradation** — ChromaDB → BM25, PyYAML → regex, Git → file scan
 8. **Zero-config** — `make setup` + `make add-client` and you're running
 

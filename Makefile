@@ -106,6 +106,8 @@ endif
 
 # ── full-sync ─────────────────────────────────────────────
 # Fetches from all remotes, syncs KB, rebuilds ChromaDB, and re-indexes HTI.
+# NOTE: After merging feat/rrf-reranker, run make full-sync
+# to re-index YAML/HCL files with structural chunk boundaries.
 full-sync:
 ifdef CLIENT
 	@echo.
