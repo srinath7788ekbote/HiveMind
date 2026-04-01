@@ -60,6 +60,36 @@ After each investigation phase, the team-lead updates this block:
 This block must be included in every team-lead response during
 multi-step investigations to preserve state across context compaction.
 
+
+### Pre/Post Tool Checklists
+
+#### Pre-Query Checklist (before ANY query_memory, query_graph, or HTI call)
+1. ✓ Active client is set (check get_active_client) — if not, ask user or set_client
+2. ✓ Active branch is set and fresh (ensure_fresh) — auto-sync if stale
+3. ✓ For HTI calls: verify HTI is indexed for this client (if hti_get_skeleton
+   returns empty/error, fall back to query_memory)
+
+#### Pre-Write Checklist (before write_file or propose_edit)
+1. ✓ Target branch is NOT protected (main, master, develop, release/*)
+2. ✓ Working branch exists with correct prefix (feat/*, fix/*, chore/*, refactor/*)
+3. ✓ User has explicitly requested the write operation
+4. ✓ File path is confirmed (not guessed)
+
+#### Post-Investigation Checklist (after completing any investigation)
+1. ✓ Offer to save investigation: "Want me to save this investigation for future reference?"
+2. ✓ Verify all repos in client config were searched (check SEARCH_COVERAGE)
+3. ✓ Flag any unanswered gaps in the final response
+4. ✓ Include CONFIDENCE rating with justification
+
+#### Post-Error Recovery
+If any tool call returns an error:
+1. ✓ Do NOT retry the same call with the same parameters
+2. ✓ Check if the error is "client not set" → call set_client
+3. ✓ Check if the error is "branch not found" → call list_branches, suggest alternatives
+4. ✓ Check if the error is "HTI not indexed" → fall back to query_memory
+5. ✓ If the error is unexpected, report it to the user with the exact error message
+
+
 ---
 
 <!-- ============================================================ -->
