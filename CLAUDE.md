@@ -136,6 +136,12 @@ All 21 HiveMind MCP tools are available via `.vscode/mcp.json`. The tools are sh
 
 Key tools: `hivemind_get_active_client`, `hivemind_query_memory`, `hivemind_query_graph`, `hivemind_get_entity`, `hivemind_search_files`, `hivemind_get_pipeline`, `hivemind_get_secret_flow`, `hivemind_impact_analysis`, `hivemind_diff_branches`, `hivemind_list_branches`, `hivemind_set_client`, `hivemind_write_file`, `hivemind_read_file`, `hivemind_propose_edit`, `hivemind_check_branch`, `hivemind_ensure_fresh`, `hivemind_get_active_branch`, `hivemind_save_investigation`, `hivemind_recall_investigation`, `hivemind_hti_get_skeleton`, `hivemind_hti_fetch_nodes`.
 
+### Tool Tiers (Quick Reference)
+
+* **Tier 1** (parallel-safe, read-only): query\_memory, query\_graph, get\_entity, search\_files, hti\_\*, check\_branch, list\_branches, read\_file, recall\_investigation, ensure\_fresh, get\_active\_\*
+* **Tier 2** (serial, analysis): impact\_analysis, diff\_branches, get\_pipeline, get\_secret\_flow, save\_investigation, set\_client
+* **Tier 3** (user approval): write\_file, propose\_edit
+
 ***
 
 ## File Reference Format
