@@ -164,6 +164,13 @@ Then use `hivemind_query_memory`, `hivemind_query_graph`, `hivemind_get_entity`,
 `hivemind_search_files`, and `hivemind_list_branches` for initial triage before
 routing to specialist agents.
 
+`hivemind_query_memory` uses a 3-stage hybrid retrieval pipeline: ChromaDB semantic
+search + BM25 keyword search (top-20 each) → Reciprocal Rank Fusion (RRF, k=60) →
+FlashRank cross-encoder reranking. Results include `rrf_score` (fusion confidence)
+and `flashrank_score` (cross-encoder relevance — most important). Higher
+`flashrank_score` = more relevant to the specific query. The top-20 RRF candidates
+are reranked down to top-5 (default) results.
+
 All tools are available as MCP tools — call them directly by name (e.g.
 `hivemind_query_memory(client="dfin", query="...")`).
 Do NOT use slash commands or the VS Code extension participant.

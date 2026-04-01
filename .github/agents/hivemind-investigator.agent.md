@@ -71,7 +71,7 @@ When investigating any failure, drill through these 5 layers in order:
 
 | Tool | When |
 |------|------|
-| `query_memory` | To search for error messages, patterns, and related content |
+| `query_memory` | To search for error messages, patterns, and related content. Results are fused via RRF and reranked by FlashRank — prioritize chunks with high `flashrank_score` as this indicates true relevance to your query, not just keyword/vector proximity |
 | `query_graph` | To trace dependency chains from the failing component |
 | `get_pipeline` | To examine pipeline stages where failures occur |
 | `get_secret_flow` | To trace secret chains when access errors are involved |

@@ -45,7 +45,7 @@ You are the **Planner Agent** -- specialist in creating runbooks, migration plan
 
 | Tool | When |
 |------|------|
-| `query_memory` | To find existing procedures, patterns, and configurations |
+| `query_memory` | To find existing procedures, patterns, and configurations. Results are fused from BM25+ChromaDB via RRF, then reranked by FlashRank. Higher `flashrank_score` = more relevant to your query |
 | `query_graph` | To understand dependency ordering for steps |
 | `search_files` | To find configuration files that need to be modified |
 | `get_pipeline` | To understand deployment pipelines for the procedure |

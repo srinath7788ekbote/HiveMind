@@ -50,7 +50,7 @@ You are the **Analyst Agent** -- specialist in impact analysis, blast radius ass
 |------|------|
 | `impact_analysis` | Primary tool -- finds all dependents of an entity |
 | `query_graph` | To traverse dependency relationships via BFS |
-| `query_memory` | To find references to the entity across all repos |
+| `query_memory` | To find references to the entity across all repos. Results are fused from BM25+ChromaDB via RRF, then reranked by FlashRank cross-encoder. Higher `flashrank_score` = more relevant to your specific query |
 | `search_files` | To find files that reference the entity |
 | `get_entity` | To get full details of the entity being analyzed |
 

@@ -281,7 +281,7 @@ Copilot can call these tools directly — no extension, slash commands, or parti
 |----------|---------|
 | `hivemind_get_active_client` | Get the current client name — **call this FIRST** |
 | `hivemind_get_active_branch` | Get the current active branch |
-| `hivemind_query_memory` | Semantic search over indexed KB (Terraform, pipelines, Helm, etc.) |
+| `hivemind_query_memory` | 3-stage hybrid search: ChromaDB top-20 + BM25 top-20 → RRF k=60 → FlashRank rerank. Result fields: `rrf_score`, `flashrank_score`, `retrieval_method` |
 | `hivemind_query_graph` | Traverse entity relationship graph |
 | `hivemind_get_entity` | Look up a specific entity by name |
 | `hivemind_search_files` | Search for indexed files by name, type, or repo |
@@ -309,6 +309,29 @@ Copilot can call these tools directly — no extension, slash commands, or parti
 4. **For create/modify tasks** — call read tools first to understand existing patterns, then generate content, then call `hivemind_write_file`
 5. **Stream your thinking** — explain which tools you are calling and why as you work
 6. **Cite file paths** from tool results in every answer
+
+### Retrieval Pipeline (query_memory internals)
+
+`query_memory` uses a 3-stage hybrid retrieval pipeline:
+1. **ChromaDB** semantic search (top-20) + **BM25** keyword search (top-20)
+2. **Reciprocal Rank Fusion** (RRF, k=60) merges both result sets
+3. **FlashRank** cross-encoder (ms-marco-MiniLM-L-12-v2, ONNX, CPU-only) reranks fused results to return top-N
+
+Result fields:
+- `rrf_score`: fusion confidence (high when both BM25 and ChromaDB rank the chunk highly)
+- `flashrank_score`: cross-encoder relevance (most important — true query-document relevance)
+- `retrieval_method`: `hybrid_rrf_reranked` (normal) or `hybrid_rrf_no_rerank` (FlashRank unavailable)
+
+Dependency: `flashrank>=0.2.9` (lazy-loaded singleton, ~50MB model downloaded on first use).
+
+### Structural Chunking
+
+YAML and HCL files are chunked by structural boundaries via `ingest/chunkers/structural_chunker.py`:
+- `.tf`/`.tfvars` → one chunk per resource/variable block
+- Harness pipeline YAML → one chunk per pipeline stage (e.g., 251 fixed-size chunks → 6 stage chunks)
+- `values.yaml` → one chunk per top-level service section
+- Other YAML → one chunk per top-level key
+- All other files → fixed-size chunking (fallback)
 
 ### Tool Selection Guide
 

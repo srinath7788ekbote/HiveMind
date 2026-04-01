@@ -4,7 +4,7 @@
 
 HiveMind is a local-first SRE knowledge assistant that indexes your infrastructure repos (Terraform, Harness pipelines, Helm charts, Kubernetes secrets) into a searchable knowledge base and exposes them through 21 MCP tools, 7 specialist AI agents, and 17 skills — all inside VS Code. You ask questions in natural language, and HiveMind answers using your actual infrastructure data with file-path citations.
 
-HiveMind uses a triple retrieval system: ChromaDB vectors for semantic search, BM25 (built at runtime from JSON chunks) for keyword search, and HTI (HiveMind Tree Intelligence) for precise structural navigation of YAML/HCL files.
+HiveMind uses a triple retrieval system: a 3-stage hybrid pipeline (ChromaDB vectors + BM25 keyword search, merged via Reciprocal Rank Fusion, then reranked by FlashRank cross-encoder) for maximum accuracy, and HTI (HiveMind Tree Intelligence) for precise structural navigation of YAML/HCL files. YAML and HCL files are chunked by structural boundaries (pipeline stages, Terraform resource blocks, Helm service sections), so retrieval returns complete coherent units.
 
 ```
   You paste logs / ask a question
@@ -406,7 +406,7 @@ All tools are exposed via the HiveMind MCP server and callable from both Copilot
 | ------------------------------- | ------------------------------------------------------------ | ----------------------------------------------- |
 | `hivemind_get_active_client`    | Get the currently active client name                         | "Which client am I working with?"               |
 | `hivemind_get_active_branch`    | Get the currently active branch                              | "Which branch am I on?"                         |
-| `hivemind_query_memory`         | Semantic search over indexed KB (Terraform, pipelines, Helm) | "Resource limits for tagging-service"           |
+| `hivemind_query_memory`         | 3-stage hybrid search (BM25+ChromaDB → RRF → FlashRank)  | "Resource limits for tagging-service"           |
 | `hivemind_query_graph`          | Traverse entity relationship graph (BFS)                     | "What depends on auth-service?"                 |
 | `hivemind_get_entity`           | Look up a specific entity by name                            | "Get full details of tagging-service"           |
 | `hivemind_search_files`         | Search indexed files by name, type, or repo                  | "Find all values.yaml files"                    |
@@ -601,12 +601,15 @@ Sync detects new branches on remote and asks if you want to add them. Answer `y`
 
 ### ChromaDB vs BM25
 
-HiveMind supports two search backends:
+HiveMind's `query_memory` uses a 3-stage hybrid retrieval pipeline:
 
-* **BM25 (keyword search)** — searches JSON chunk files using keyword matching (\~350ms). Always works. This is the default and fallback.
-* **ChromaDB (semantic search)** — searches vector embeddings for meaning-based matching (\~370ms). Needs one-time population with `make chromadb`.
+1. **BM25 keyword search** + **ChromaDB semantic search** run in parallel (top-20 each)
+2. **Reciprocal Rank Fusion** (RRF, k=60) merges both result sets by rank
+3. **FlashRank cross-encoder** reranks the fused results for true query-document relevance
 
-Both give accurate results. ChromaDB is better at understanding synonyms and related concepts (e.g., searching "memory limits" also finds "resource requests"). BM25 is better for exact matches.
+Result fields: `rrf_score` (fusion confidence — high when both methods agree), `flashrank_score` (cross-encoder relevance — most important for your specific query), `retrieval_method` (`hybrid_rrf_reranked` or `hybrid_rrf_no_rerank` if FlashRank is unavailable).
+
+Both search backends are always used together. ChromaDB is better at understanding synonyms and related concepts (e.g., searching "memory limits" also finds "resource requests"). BM25 is better for exact matches.
 
 Run `make chromadb CLIENT=x` once to populate ChromaDB from existing JSON data. After that, `make sync` keeps both in sync.
 
@@ -656,6 +659,10 @@ Run `make chromadb CLIENT=x` once to populate ChromaDB from existing JSON data. 
 
 Run `make setup` to install dependencies into the virtual environment.
 
+### First query is slow (~2-5 seconds)
+
+Normal. The FlashRank cross-encoder model (~50MB) loads on first query and is then cached for the session. Subsequent queries use the cached model (~500ms total retrieval).
+
 ### ChromaDB import error
 
 Use Python 3.12 or 3.13 — ChromaDB does not support Python 3.14+.
@@ -694,7 +701,7 @@ Use Python 3.12 or 3.13 — ChromaDB does not support Python 3.14+.
 ```
 hivemind_get_active_client     Get current client context
 hivemind_get_active_branch     Get current branch context
-hivemind_query_memory          Semantic search (BM25/ChromaDB)
+hivemind_query_memory          3-stage hybrid search (BM25/ChromaDB → RRF → FlashRank)
 hivemind_query_graph           Entity relationship graph traversal
 hivemind_get_entity            Entity lookup by name
 hivemind_search_files          File search by name/type/repo
