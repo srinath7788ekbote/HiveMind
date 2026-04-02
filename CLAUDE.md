@@ -44,10 +44,12 @@ Run these freely — they are read-only or non-destructive:
 
 ```
 python scripts/sync_kb.py --status
+python scripts/sync_kb.py --client <client> --auto-yes --workers 4
 python tools/query_memory.py --client <client> --query <query>
 python -m pytest tests/ -q
 python scripts/populate_chromadb.py --verify
 python hivemind_mcp/hivemind_server.py --test
+python scripts/hti_index_all.py --workers 4
 ```
 
 ### Unsafe Commands (require explicit user approval)
@@ -117,6 +119,25 @@ planner ──→ devops (plan ready → start implementation)
 ```
 
 Maximum 3 handoff hops per investigation. Maximum 8 total consultations per task.
+
+### Nested Subagent Support (VS Code 1.113+)
+
+With `chat.subagents.allowInvocationsFromSubagents: true` in
+.vscode/settings.json, specialists can invoke other specialists
+directly without routing through team-lead. Each specialist's
+agent.md frontmatter defines an allowlist of agents it can invoke.
+Subagents get isolated context and return summary only.
+
+Direct delegation paths:
+- investigator → security, devops, architect
+- devops → architect, security
+- architect → security, devops
+- security → architect
+- analyst → planner
+- planner → devops
+
+No specialist can invoke team-lead (prevents upward recursion).
+The 3-hop maximum counts total depth including nested calls.
 
 ### CrewAI-Inspired Coordination Model
 

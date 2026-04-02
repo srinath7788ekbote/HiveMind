@@ -547,6 +547,7 @@ The benchmark exits with code 0 if accuracy >= 75%, otherwise 1. This makes it u
 
 ```Shell
 make sync
+make sync WORKERS=4          # optional: use parallel workers for faster sync
 ```
 
 * Runs automatically at 7am daily via Task Scheduler (using `scripts/sync_kb_scheduled.bat`)
@@ -733,7 +734,8 @@ make chromadb-all       Populate ChromaDB for all clients
 make server             Start MCP server (keep running)
 make start              Start HiveMind background watcher daemon
 make stop               Stop HiveMind background watcher daemon
-make sync               Daily sync — updates KB + HTI (~5 min)
+make sync               Daily sync — updates KB + HTI (~5 min, or ~2 min with WORKERS=4)
+make sync WORKERS=4     Sync with parallel workers
 make status             Check what's indexed (instant)
 make test               Run test suite
 make verify             Run tests + KB status + ChromaDB + HTI check
@@ -751,6 +753,7 @@ make benchmark-report   Run v2 + save report to file
 make hti-setup CLIENT=x Full HTI setup (migrate + index)
 make hti-index CLIENT=x Index repos into HTI structural DB
 make hti-index          Index all clients into HTI
+make hti-index WORKERS=4 Index HTI with parallel workers
 make hti-status         Show HTI index status
 make hti-migrate CLIENT=x Run HTI schema migration
 ```

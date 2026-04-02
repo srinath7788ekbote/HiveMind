@@ -482,10 +482,38 @@ When working as a HiveMind agent, you may receive handoff context from another a
 
 ### Collaboration Protocol
 
-- Maximum **3 handoff hops** per investigation (A -> B -> C -> stops)
+- Maximum **3 handoff hops** per investigation (A -> B -> C -> stops) — counts TOTAL depth including nested subagent calls
 - Maximum **8 total consultations** per task
 - If a handoff brings context from another agent, use it -- do not re-query what they already found
 - When handing off, always include your current findings so the next agent has full context
+
+### Nested Subagent Support (VS Code 1.113+)
+
+Requires: `"chat.subagents.allowInvocationsFromSubagents": true` in
+.vscode/settings.json
+
+Specialists can invoke other specialists directly as subagents.
+Subagents run in isolated context and return a summary only.
+Maximum nesting depth: 5 levels (VS Code limit).
+HiveMind limit: 3 hops maximum per investigation (unchanged).
+
+Direct specialist-to-specialist delegation paths:
+```
+team-lead ──→ investigator ──→ security (direct subagent)
+                             ──→ devops (direct subagent)
+                             ──→ architect (direct subagent)
+team-lead ──→ analyst ──→ planner (direct subagent)
+team-lead ──→ planner ──→ devops (direct subagent)
+team-lead ──→ devops ──→ architect (direct subagent)
+                       ──→ security (direct subagent)
+team-lead ──→ architect ──→ security (direct subagent)
+                          ──→ devops (direct subagent)
+team-lead ──→ security ──→ architect (direct subagent)
+```
+
+Each specialist's `agents` frontmatter in their `.agent.md` file defines
+the allowlist of agents it can invoke. No specialist can invoke team-lead
+(prevents upward recursion). The delegation graph is acyclic at depth 3.
 
 
 ---

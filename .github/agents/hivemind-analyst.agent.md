@@ -8,6 +8,8 @@ description: >
 tools:
   - read
   - search
+agents:
+  - hivemind-planner
 user-invocable: true
 handoffs:
   - label: "-> Planner (generate safe change runbook)"
@@ -84,6 +86,30 @@ Always cite files using `repo/path/to/file.ext:L<line>` format.
 This is clickable in VS Code and lets the user jump directly to the source.
 Never reference files by name alone without the full path.
 When line numbers are unavailable, use `repo/path/to/file.ext` (no line suffix).
+
+## Direct Subagent Delegation (VS Code 1.113+)
+
+You can invoke specialist agents directly as subagents without routing
+through team-lead. Use this for focused, scoped questions:
+
+### When to delegate directly:
+- After completing blast radius analysis, you need a safe change
+  runbook → invoke hivemind-planner with the risk level, affected
+  entities, and specific files that need changes
+
+### When to hand back to team-lead instead:
+- The investigation is complete and needs cross-domain synthesis
+- You need security, devops, or architect context (hand back for routing)
+- The scope has expanded beyond impact analysis
+
+### Delegation format:
+When invoking a subagent, pass a focused task description:
+"Generate a safe change runbook for modifying
+Eastwood-terraform/layer_3/aks.tf. Risk: HIGH. Affected services:
+audit-service, parser-service, client-service. Include rollback steps."
+
+Do NOT pass your entire investigation context. The subagent gets
+isolated context — pass only the specific question and relevant files.
 
 ## Response Format
 

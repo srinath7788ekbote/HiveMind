@@ -278,6 +278,7 @@ def save_to_graph_db(edges: list[dict], db_path: str) -> None:
         edges — relationships between entities
     """
     conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA journal_mode=WAL")
     cursor = conn.cursor()
 
     cursor.execute("""

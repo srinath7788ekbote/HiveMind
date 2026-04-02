@@ -15,6 +15,7 @@ Usage:
     python scripts/sync_kb.py --client dfin --repo dfin-harness-pipelines
     python scripts/sync_kb.py --client dfin --repo X --branch main
     python scripts/sync_kb.py --auto-yes               # no prompts (cron)
+    python scripts/sync_kb.py --workers 3              # parallel with 3 workers
 """
 
 import argparse
@@ -24,10 +25,22 @@ import os
 import subprocess
 import sys
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+
+
+def _default_workers() -> int:
+    """Auto-detect worker count: leave 2 cores free, min 1, max 4."""
+    cpus = os.cpu_count() or 4
+    return max(1, min(cpus - 2, 4))
+
+
+# Thread-safe print lock for parallel output
+_print_lock = threading.Lock()
 
 # ---------------------------------------------------------------------------
 # Client discovery
@@ -143,7 +156,7 @@ def _bootstrap_state_from_branch_index(
             if head:
                 state[key] = {
                     "commit": head,
-                    "synced_at": "bootstrapped",
+                    "synced_at": time.strftime("%Y-%m-%d %H:%M"),
                 }
                 seeded += 1
 
@@ -524,9 +537,12 @@ def sync_client(
     auto_yes: bool = False,
     project_root: Path | None = None,
     fetch: bool = False,
+    max_workers: int = 1,
 ) -> dict:
     """
     Sync a single client. Returns summary dict.
+
+    When max_workers > 1, repo/branch pairs are crawled in parallel.
     """
     root = project_root or PROJECT_ROOT
     config_path = root / "clients" / client / "repos.yaml"
@@ -585,6 +601,9 @@ def sync_client(
     errors = 0
     start = time.time()
 
+    # --- Phase 1: Collect all repo/branch pairs that need syncing ---
+    to_sync = []  # list of (repo_name, repo_path, branch, changed_list, new_commit)
+
     for repo in repos:
         repo_name = repo.get("name", "unknown")
         repo_path = repo.get("path", "")
@@ -612,42 +631,98 @@ def sync_client(
                 n_changed = result['files_changed']
                 changed_list = result.get('changed_file_list', [])
                 print(f"  [!] {key} -- {n_changed} files changed")
-                # Re-index this branch
-                try:
-                    from ingest.crawl_repos import crawl
-                    if not auto_yes and not force:
-                        answer = input(f"    Re-index {key}? [Y/n] ").strip().lower()
-                        if answer and answer != "y":
-                            skipped += 1
-                            continue
-                    t0 = time.time()
-                    print(f"    Syncing {key}...")
-                    crawl(
-                        client=client,
-                        config_path=str(config_path),
-                        branches=[branch],
-                        verbose=True,
-                        changed_files=changed_list if changed_list else None,
-                        repo_name_filter=repo_name,
-                    )
-                    elapsed_branch = time.time() - t0
-                    print(f"    Synced {key} ({elapsed_branch:.0f}s)")
-                    synced += 1
-                except Exception as exc:
-                    print(f"    [X] Error re-indexing {key}: {exc}")
-                    errors += 1
-                    continue
-                # Update state immediately so Ctrl+C doesn't lose progress
-                state[key] = {
-                    "commit": result["new_commit"],
-                    "synced_at": time.strftime("%Y-%m-%d %H:%M"),
-                }
-                _save_state(client, state, root)
+                if not auto_yes and not force:
+                    answer = input(f"    Re-index {key}? [Y/n] ").strip().lower()
+                    if answer and answer != "y":
+                        skipped += 1
+                        continue
+                to_sync.append((repo_name, repo_path, branch, changed_list, result["new_commit"]))
             else:
                 print(f"  [X] {key} -- {result.get('message', 'error')}")
                 errors += 1
 
-        # Update state for up-to-date branches too
+    # --- Phase 2: Crawl all changed repo/branch pairs ---
+    if to_sync:
+        from ingest.crawl_repos import crawl
+
+        def _crawl_one(repo_name, repo_path, branch, changed_list):
+            """Crawl a single repo/branch. Returns (key, elapsed, error)."""
+            key = f"{repo_name}/{branch}"
+            t0 = time.time()
+            try:
+                # When parallel, suppress per-file progress to avoid interleaved output
+                verbose = max_workers <= 1
+                crawl(
+                    client=client,
+                    config_path=str(config_path),
+                    branches=[branch],
+                    verbose=verbose,
+                    changed_files=changed_list if changed_list else None,
+                    repo_name_filter=repo_name,
+                )
+                elapsed_branch = time.time() - t0
+                return key, elapsed_branch, None
+            except Exception as exc:
+                elapsed_branch = time.time() - t0
+                return key, elapsed_branch, str(exc)
+
+        effective_workers = min(max_workers, len(to_sync))
+
+        if effective_workers <= 1:
+            # Sequential (original behavior with progress output)
+            for repo_name, repo_path, branch, changed_list, new_commit in to_sync:
+                key = f"{repo_name}/{branch}"
+                print(f"    Syncing {key}...")
+                key, elapsed_branch, error = _crawl_one(repo_name, repo_path, branch, changed_list)
+                if error:
+                    print(f"    [X] Error re-indexing {key}: {error}")
+                    errors += 1
+                else:
+                    print(f"    Synced {key} ({elapsed_branch:.0f}s)")
+                    synced += 1
+                    state[key] = {
+                        "commit": new_commit,
+                        "synced_at": time.strftime("%Y-%m-%d %H:%M"),
+                    }
+                    _save_state(client, state, root)
+        else:
+            # Parallel crawling
+            print(f"\n  Syncing {len(to_sync)} branches with {effective_workers} workers...")
+            sync_results = {}
+            with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+                future_to_info = {}
+                for repo_name, repo_path, branch, changed_list, new_commit in to_sync:
+                    future = executor.submit(_crawl_one, repo_name, repo_path, branch, changed_list)
+                    future_to_info[future] = (repo_name, branch, new_commit)
+
+                for future in as_completed(future_to_info):
+                    repo_name, branch, new_commit = future_to_info[future]
+                    key, elapsed_branch, error = future.result()
+                    with _print_lock:
+                        if error:
+                            print(f"    [X] Error re-indexing {key}: {error}")
+                            errors += 1
+                        else:
+                            print(f"    Synced {key} ({elapsed_branch:.0f}s)")
+                            synced += 1
+                            state[key] = {
+                                "commit": new_commit,
+                                "synced_at": time.strftime("%Y-%m-%d %H:%M"),
+                            }
+            # Save state once after all parallel workers complete
+            _save_state(client, state, root)
+
+    # Update state for up-to-date branches too (needs separate pass over repos)
+    for repo in repos:
+        repo_name = repo.get("name", "unknown")
+        repo_path = repo.get("path", "")
+        if repo_filter and repo_name != repo_filter:
+            continue
+        if not repo_path or not Path(repo_path).exists():
+            continue
+        branches = repo.get("branches", ["main"])
+        if branch_filter:
+            branches = [branch_filter] if branch_filter in branches else []
         for branch in branches:
             key = f"{repo_name}/{branch}"
             result = _sync_repo_branch(repo_path, repo_name, branch, state, force=False)
@@ -655,8 +730,8 @@ def sync_client(
                 if key not in state:
                     state[key] = {}
                 state[key]["commit"] = result["new_commit"]
-                if "synced_at" not in state[key]:
-                    state[key]["synced_at"] = "initial"
+                if "synced_at" not in state[key] or state[key]["synced_at"] in ("initial", "bootstrapped"):
+                    state[key]["synced_at"] = time.strftime("%Y-%m-%d %H:%M")
 
     _save_state(client, state, root)
 
@@ -695,6 +770,7 @@ def sync_all(
     auto_yes: bool = False,
     project_root: Path | None = None,
     fetch: bool = False,
+    max_workers: int = 1,
 ):
     """Sync one or many clients, with summary output."""
     root = project_root or PROJECT_ROOT
@@ -719,6 +795,7 @@ def sync_all(
             auto_yes=auto_yes,
             project_root=root,
             fetch=fetch,
+            max_workers=max_workers,
         )
         summaries.append(summary)
 
@@ -769,6 +846,9 @@ def main():
                         help="Seed embed state from current ChromaDB data (run once after full-sync)")
     parser.add_argument("--check-freshness", action="store_true",
                         help="Check branch freshness vs remote (no sync, report only)")
+    parser.add_argument("--workers", type=int, default=None,
+                        help="Number of parallel workers for crawling "
+                             f"(default: auto = {_default_workers()}, based on CPU count)")
     args = parser.parse_args()
 
     # Determine client list
@@ -850,6 +930,9 @@ def main():
     elif args.status:
         show_status(clients, PROJECT_ROOT)
     else:
+        max_workers = args.workers if args.workers is not None else _default_workers()
+        if max_workers > 1:
+            print(f"Workers: {max_workers} (CPUs: {os.cpu_count()})")
         sync_all(
             clients=clients,
             force=args.force,
@@ -858,6 +941,7 @@ def main():
             auto_yes=args.auto_yes,
             project_root=PROJECT_ROOT,
             fetch=args.fetch,
+            max_workers=max_workers,
         )
 
 

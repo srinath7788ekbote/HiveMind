@@ -8,6 +8,9 @@ description: >
 tools:
   - read
   - search
+agents:
+  - hivemind-security
+  - hivemind-devops
 user-invocable: true
 handoffs:
   - label: "-> Security (RBAC/identity ownership question)"
@@ -74,6 +77,32 @@ Always cite files using `repo/path/to/file.ext:L<line>` format.
 This is clickable in VS Code and lets the user jump directly to the source.
 Never reference files by name alone without the full path.
 When line numbers are unavailable, use `repo/path/to/file.ext` (no line suffix).
+
+## Direct Subagent Delegation (VS Code 1.113+)
+
+You can invoke specialist agents directly as subagents without routing
+through team-lead. Use this for focused, scoped questions:
+
+### When to delegate directly:
+- You find RBAC/Key Vault access policy issues in Terraform → invoke
+  hivemind-security with the specific identity or role assignment
+- You need to know which pipeline deploys a Terraform layer → invoke
+  hivemind-devops with the specific layer path and repo
+
+### When to hand back to team-lead instead:
+- The investigation is complete and needs cross-domain synthesis
+- You need the analyst for blast radius (you don't have analyst access)
+- You need the investigator for root cause tracing
+
+### Delegation format:
+When invoking a subagent, pass a focused task description:
+"Check the managed identity role assignments for identity
+azurerm_user_assigned_identity.client_service in
+Eastwood-terraform/layer_5/identities.tf:L23. Report: which roles
+are assigned, to which scopes, and any missing permissions."
+
+Do NOT pass your entire investigation context. The subagent gets
+isolated context — pass only the specific question and relevant files.
 
 ## Response Format
 

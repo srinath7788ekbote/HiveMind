@@ -48,8 +48,9 @@ def get_hti_connection(client: str, project_root: Path = None) -> sqlite3.Connec
     db_path = get_hti_db_path(client, project_root)
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(str(db_path), timeout=60)
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=60000")
     conn.execute("PRAGMA foreign_keys=ON")
 
     # Apply schema if tables don't exist

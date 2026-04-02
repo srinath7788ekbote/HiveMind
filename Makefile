@@ -5,6 +5,7 @@
 
 CLIENT ?=
 FORCE ?=
+WORKERS ?=
 
 # ── help ──────────────────────────────────────────────────
 help:
@@ -20,6 +21,7 @@ help:
 	@echo    make crawl CLIENT=xxx   Index single client
 	@echo    make sync               Sync all changed files (daily)
 	@echo    make sync CLIENT=xxx    Sync single client
+	@echo    make sync WORKERS=4     Sync with parallel workers
 	@echo    make full-sync           Fetch remotes + sync + ChromaDB + HTI
 	@echo    make full-sync CLIENT=xxx  Full sync for one client
 	@echo    make bootstrap-state    Seed sync baseline (fix stuck sync)
@@ -47,6 +49,7 @@ help:
 	@echo    make hti-setup CLIENT=xxx  Full HTI setup for new client
 	@echo    make hti-index CLIENT=xxx  Index repos into HTI (structural search)
 	@echo    make hti-index             Index all clients into HTI
+	@echo    make hti-index WORKERS=4   Index HTI with parallel workers
 	@echo    make hti-status            Show HTI index status
 	@echo    make hti-status CLIENT=xxx Show HTI index status (one client)
 	@echo    make hti-migrate CLIENT=xxx Run HTI schema migration
@@ -79,7 +82,11 @@ setup:
 crawl-all:
 	@.venv\Scripts\python scripts\crawl_all.py --verbose
 	@echo Running HTI indexing for all clients...
+ifdef WORKERS
+	@.venv\Scripts\python scripts\hti_index_all.py --workers $(WORKERS)
+else
 	@.venv\Scripts\python scripts\hti_index_all.py
+endif
 
 # ── crawl ─────────────────────────────────────────────────
 crawl:
@@ -93,15 +100,28 @@ else
 endif
 
 # ── sync ──────────────────────────────────────────────────
+# Use WORKERS=N to parallelize repo/branch syncing (default: auto-detect).
 sync:
 ifdef CLIENT
+ifdef WORKERS
+	@.venv\Scripts\python scripts\sync_kb.py --client $(CLIENT) --auto-yes --workers $(WORKERS)
+else
 	@.venv\Scripts\python scripts\sync_kb.py --client $(CLIENT) --auto-yes
+endif
 	@echo Syncing HTI index...
 	@.venv\Scripts\python hivemind_mcp\hti\indexer.py --client $(CLIENT) 2>nul || echo HTI: skipped (not set up for $(CLIENT))
 else
+ifdef WORKERS
+	@.venv\Scripts\python scripts\sync_kb.py --auto-yes --workers $(WORKERS)
+else
 	@.venv\Scripts\python scripts\sync_kb.py --auto-yes
+endif
 	@echo Syncing HTI index for all clients...
+ifdef WORKERS
+	@.venv\Scripts\python scripts\hti_index_all.py --workers $(WORKERS) 2>nul || echo HTI: skipped (run make hti-setup first)
+else
 	@.venv\Scripts\python scripts\hti_index_all.py 2>nul || echo HTI: skipped (run make hti-setup first)
+endif
 endif
 
 # ── full-sync ─────────────────────────────────────────────
@@ -116,7 +136,11 @@ ifdef CLIENT
 	@echo ============================================
 	@echo.
 	@echo [1/3] Fetching remotes + syncing KB...
+ifdef WORKERS
+	@.venv\Scripts\python scripts\sync_kb.py --client $(CLIENT) --auto-yes --fetch --workers $(WORKERS)
+else
 	@.venv\Scripts\python scripts\sync_kb.py --client $(CLIENT) --auto-yes --fetch
+endif
 	@echo.
 	@echo [2/3] Populating ChromaDB...
 	@.venv\Scripts\python scripts\populate_chromadb.py --client $(CLIENT)
@@ -134,13 +158,21 @@ else
 	@echo ============================================
 	@echo.
 	@echo [1/3] Fetching remotes + syncing KB...
+ifdef WORKERS
+	@.venv\Scripts\python scripts\sync_kb.py --auto-yes --fetch --workers $(WORKERS)
+else
 	@.venv\Scripts\python scripts\sync_kb.py --auto-yes --fetch
+endif
 	@echo.
 	@echo [2/3] Populating ChromaDB...
 	@.venv\Scripts\python scripts\populate_all_chromadb.py
 	@echo.
 	@echo [3/3] Indexing HTI...
+ifdef WORKERS
+	@.venv\Scripts\python scripts\hti_index_all.py --workers $(WORKERS) 2>nul || echo HTI: skipped (run make hti-setup first)
+else
 	@.venv\Scripts\python scripts\hti_index_all.py 2>nul || echo HTI: skipped (run make hti-setup first)
+endif
 	@echo.
 	@echo ============================================
 	@echo  FULL SYNC COMPLETE: ALL CLIENTS
@@ -255,6 +287,7 @@ else
 endif
 
 # ── hti-index ────────────────────────────────────────────
+# Use WORKERS=N to index branches in parallel (default: auto-detect).
 hti-index:
 ifdef CLIENT
 ifdef FORCE
@@ -263,7 +296,11 @@ else
 	@.venv\Scripts\python hivemind_mcp\hti\indexer.py --client $(CLIENT)
 endif
 else
+ifdef WORKERS
+	@.venv\Scripts\python scripts\hti_index_all.py --workers $(WORKERS)
+else
 	@.venv\Scripts\python scripts\hti_index_all.py
+endif
 endif
 
 # ── hti-status ───────────────────────────────────────────

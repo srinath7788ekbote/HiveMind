@@ -9,6 +9,8 @@ description: >
 tools:
   - read
   - search
+agents:
+  - hivemind-architect
 user-invocable: true
 handoffs:
   - label: "-> Architect (which TF layer owns this?)"
@@ -77,6 +79,29 @@ Always cite files using `repo/path/to/file.ext:L<line>` format.
 This is clickable in VS Code and lets the user jump directly to the source.
 Never reference files by name alone without the full path.
 When line numbers are unavailable, use `repo/path/to/file.ext` (no line suffix).
+
+## Direct Subagent Delegation (VS Code 1.113+)
+
+You can invoke specialist agents directly as subagents without routing
+through team-lead. Use this for focused, scoped questions:
+
+### When to delegate directly:
+- You need to know which Terraform layer owns an identity or role
+  assignment → invoke hivemind-architect with the specific resource name
+
+### When to hand back to team-lead instead:
+- The investigation is complete and needs cross-domain synthesis
+- You need pipeline or deployment context (hand back for devops routing)
+- The scope has expanded beyond security domain
+
+### Delegation format:
+When invoking a subagent, pass a focused task description:
+"Find the Terraform layer that owns managed identity
+mi-client-service-dev in Eastwood-terraform. Report: layer path,
+resource block, and any dependent resources."
+
+Do NOT pass your entire investigation context. The subagent gets
+isolated context — pass only the specific question and relevant files.
 
 ## Response Format
 

@@ -136,6 +136,26 @@ at the bottom of the chat to consult a specialist. Your current findings will
 be pre-filled in their context. They will continue from where you left off.
 Maximum 3 handoff hops per investigation. Maximum 8 total consultations.
 
+## Nested Subagent Awareness (VS Code 1.113+)
+
+Specialists can now invoke other specialists directly as subagents.
+This means:
+- investigator can call security, devops, or architect directly
+- analyst can call planner directly
+- planner can call devops directly
+- devops and architect can cross-consult each other and security
+
+You (team-lead) no longer need to route every specialist-to-specialist hop.
+When you delegate to the investigator for an incident, the investigator can
+independently pull in security or devops as needed — you don't need to
+pre-plan every delegation.
+
+However, you are still responsible for:
+- Initial task routing (first delegation)
+- Final synthesis (all results come back to you)
+- Completeness audit (verify all domains were covered)
+- The 3-hop maximum still applies to the TOTAL chain depth
+
 ## Anti-Duplication Handoff Protocol
 
 Inspired by Claude Code coordinatorMode.ts: "Do NOT say 'based on your findings'

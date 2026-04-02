@@ -23,7 +23,7 @@ Works with any client — multi-tenant architecture discovers and indexes all co
   └──────┬──────────────────────────────────────────────────────┘
          │                    ┌──────────────────┐
          │                    │  Incremental Sync │  make sync (daily)
-         │                    │  changed files    │  detects diffs, re-indexes
+         │                    │  changed files    │  parallel workers
          │                    └────────┬─────────┘
          ▼                             ▼
   ┌──────────────┐  ┌──────────────┐  ┌─────────────┐
@@ -269,10 +269,10 @@ HiveMind/
 │   │   └── structural_chunker.py   #   YAML/HCL/Helm structure-aware chunking
 │   └── discovery/                  #   Auto-discovery modules
 ├── scripts/                        # Operational scripts
-│   ├── sync_kb.py                  #   Incremental sync (multi-client + HTI)
+│   ├── sync_kb.py                  #   Incremental sync (multi-client + HTI + parallel workers)
 │   ├── populate_chromadb.py        #   ChromaDB population (multi-client)
 │   ├── crawl_all.py                #   Crawl all clients
-│   ├── hti_index_all.py            #   HTI index all clients
+│   ├── hti_index_all.py            #   HTI index all clients (parallel branches)
 │   ├── populate_all_chromadb.py    #   Populate all clients
 │   ├── add_client.py               #   New client wizard
 │   └── sync_kb_scheduled.bat       #   Scheduled Task entry point
@@ -280,7 +280,7 @@ HiveMind/
 │   ├── branch_protection.py        #   Branch protection engine
 │   ├── incremental_sync.py         #   Incremental re-indexing
 │   └── git_utils.py                #   Git operations
-├── tests/                          # Test suite (874+ tests)
+├── tests/                          # Test suite (900+ tests)
 ├── benchmarks/                     # Automated KB benchmark suite
 │   ├── run_benchmark.py            #   CLI entry point (--version v1/v2)
 │   ├── runner.py                   #   Tool execution engine
@@ -304,13 +304,14 @@ HiveMind/
 | `make setup`                   | Create venv with Python 3.12 and install dependencies      |
 | `make crawl-all`               | Full re-index of all clients (slow) + HTI                  |
 | `make crawl CLIENT=xxx`        | Index a single client + HTI                                |
-| `make sync`                    | Sync changed files — fast daily update (all clients) + HTI |
-| `make sync CLIENT=xxx`         | Sync changed files — one client + HTI                      |
+| `make sync`                    | Sync changed files — fast daily update (all clients) + HTI                       |
+| `make sync CLIENT=xxx`         | Sync changed files — one client + HTI                                            |
+| `make sync WORKERS=4`          | Sync with parallel workers (default: auto-detect cpus-2, max 4)                  |
 | `make chromadb`                | Populate ChromaDB vector store (all clients)               |
 | `make chromadb CLIENT=xxx`     | Populate ChromaDB — one client                             |
 | `make chromadb-all`            | Populate ChromaDB for all discovered clients               |
 | `make status`                  | Show sync status for all repos and branches                |
-| `make test`                    | Run all 874+ tests                                         |
+| `make test`                    | Run all 900+ tests                                         |
 | `make server`                  | Start MCP server (Copilot/Claude connects to this)         |
 | `make start`                   | Start HiveMind background watcher daemon                   |
 | `make stop`                    | Stop HiveMind background watcher daemon                    |
@@ -330,6 +331,7 @@ HiveMind/
 | `make hti-setup CLIENT=xxx`    | Full HTI setup (migrate + index)                           |
 | `make hti-index CLIENT=xxx`    | Index repos into HTI structural DB                         |
 | `make hti-index`               | Index all clients into HTI                                 |
+| `make hti-index WORKERS=4`     | Index HTI with parallel workers                            |
 | `make hti-status`              | Show HTI index status                                      |
 | `make hti-migrate CLIENT=xxx`  | Run HTI schema migration                                   |
 
@@ -346,8 +348,9 @@ HiveMind/
 | Benchmark (v2, 30 hard)   | 90/90 (100%)                               |
 | Full crawl                | \~2 hours                                  |
 | Incremental sync          | \~5 minutes                                |
-| Test suite                | 874+ tests                                 |
+| Test suite                | 900+ tests                                 |
 | Structural chunking       | Harness pipeline: 251 fixed-size chunks → 6 stage chunks |
+| Parallel sync             | ~3.5x speedup with 4 workers (auto-detected)             |
 
 ***
 

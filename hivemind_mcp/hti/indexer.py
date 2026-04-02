@@ -92,14 +92,26 @@ def index_client(
     if not repos:
         return {"error": "No repos configured", "file_count": 0}
 
-    conn = get_hti_connection(client, root)
-    cursor = conn.cursor()
-
     effective_branch = branch or "main"
     total_files = 0
     total_nodes = 0
     total_skeletons = 0
     skipped = 0
+
+    # --- Phase 1: Read mtime cache to know what to skip ---
+    existing_mtimes = {}
+    if not force:
+        conn = get_hti_connection(client, root)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, mtime_epoch FROM hti_skeletons WHERE branch = ?",
+                       (effective_branch,))
+        for row in cursor.fetchall():
+            existing_mtimes[row[0]] = row[1]
+        conn.close()
+
+    # --- Phase 2: Parse all files in memory (CPU-bound, parallel-safe) ---
+    parsed_data = []  # list of (skeleton_id, repo_name, rel_path, file_type,
+                      #          skeleton_json, nodes, file_mtime)
 
     for repo_config in repos:
         repo_name = repo_config.get("name", "unknown")
@@ -111,7 +123,7 @@ def index_client(
             continue
 
         if verbose:
-            print(f"\n  Indexing: {repo_name} ({repo_path})")
+            print(f"\n  Parsing: {repo_name} ({repo_path})")
 
         files = _walk_repo_files(repo_path)
         repo_file_count = 0
@@ -127,18 +139,13 @@ def index_client(
             # Incremental: check mtime
             file_mtime = int(file_path.stat().st_mtime)
             if not force:
-                cursor.execute(
-                    "SELECT mtime_epoch FROM hti_skeletons WHERE id = ?",
-                    (skeleton_id,),
-                )
-                row = cursor.fetchone()
-                if row and row[0] and row[0] >= file_mtime:
+                prev_mtime = existing_mtimes.get(skeleton_id)
+                if prev_mtime is not None and prev_mtime >= file_mtime:
                     skipped += 1
                     continue
 
             # Read and extract
             ext = file_path.suffix.lower()
-            content = None
             try:
                 content = file_path.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
@@ -150,7 +157,6 @@ def index_client(
                 try:
                     skeleton, nodes = extract_hcl_tree(str(file_path))
                 except ImportError:
-                    # python-hcl2 not available — skip HCL files
                     continue
             else:
                 skeleton, nodes = extract_yaml_tree(str(file_path))
@@ -159,43 +165,78 @@ def index_client(
                 continue
 
             skeleton_json = json.dumps(skeleton, separators=(",", ":"))
-
-            # Upsert skeleton
-            cursor.execute(
-                """INSERT OR REPLACE INTO hti_skeletons
-                   (id, client, repo, branch, file_path, file_type, skeleton_json,
-                    node_count, mtime_epoch, indexed_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
-                (skeleton_id, client, repo_name, effective_branch, rel_path,
-                 file_type, skeleton_json, len(nodes), file_mtime),
-            )
-
-            # Delete old nodes for this skeleton, then insert new ones
-            cursor.execute(
-                "DELETE FROM hti_nodes WHERE skeleton_id = ?",
-                (skeleton_id,),
-            )
-
-            for node in nodes:
-                node_id = f"{skeleton_id}:{node['node_path']}"
-                cursor.execute(
-                    """INSERT OR REPLACE INTO hti_nodes
-                       (id, skeleton_id, node_path, depth, content_json)
-                       VALUES (?, ?, ?, ?, ?)""",
-                    (node_id, skeleton_id, node["node_path"],
-                     node["depth"], node["content_json"]),
-                )
-
-            total_nodes += len(nodes)
-            total_skeletons += 1
+            parsed_data.append((skeleton_id, repo_name, rel_path, file_type,
+                                skeleton_json, nodes, file_mtime))
             repo_file_count += 1
 
         total_files += repo_file_count
         if verbose:
-            print(f"    Files indexed: {repo_file_count}")
+            print(f"    Files parsed: {repo_file_count}")
 
-    conn.commit()
-    conn.close()
+    # --- Phase 3: Write to SQLite in batches with retry ---
+    if parsed_data:
+        if verbose:
+            print(f"\n  Writing {len(parsed_data)} skeletons to SQLite...")
+
+        BATCH_SIZE = 50
+        max_retries = 5
+
+        for batch_start in range(0, len(parsed_data), BATCH_SIZE):
+            batch = parsed_data[batch_start:batch_start + BATCH_SIZE]
+
+            for attempt in range(max_retries):
+                conn = None
+                try:
+                    conn = get_hti_connection(client, root)
+                    cursor = conn.cursor()
+
+                    for (skeleton_id, repo_name, rel_path, file_type,
+                         skeleton_json, nodes, file_mtime) in batch:
+
+                        cursor.execute(
+                            """INSERT OR REPLACE INTO hti_skeletons
+                               (id, client, repo, branch, file_path, file_type, skeleton_json,
+                                node_count, mtime_epoch, indexed_at)
+                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+                            (skeleton_id, client, repo_name, effective_branch, rel_path,
+                             file_type, skeleton_json, len(nodes), file_mtime),
+                        )
+
+                        cursor.execute(
+                            "DELETE FROM hti_nodes WHERE skeleton_id = ?",
+                            (skeleton_id,),
+                        )
+
+                        for node in nodes:
+                            node_id = f"{skeleton_id}:{node['node_path']}"
+                            cursor.execute(
+                                """INSERT OR REPLACE INTO hti_nodes
+                                   (id, skeleton_id, node_path, depth, content_json)
+                                   VALUES (?, ?, ?, ?, ?)""",
+                                (node_id, skeleton_id, node["node_path"],
+                                 node["depth"], node["content_json"]),
+                            )
+
+                        total_nodes += len(nodes)
+                        total_skeletons += 1
+
+                    conn.commit()
+                    conn.close()
+                    break  # Success — exit retry loop
+                except Exception as e:
+                    if conn:
+                        try:
+                            conn.close()
+                        except Exception:
+                            pass
+                    if "database is locked" in str(e) and attempt < max_retries - 1:
+                        import time as _time
+                        wait = (attempt + 1) * 2  # 2, 4, 6, 8, 10 seconds
+                        if verbose:
+                            print(f"    DB locked, retry {attempt + 1}/{max_retries} in {wait}s...")
+                        _time.sleep(wait)
+                    else:
+                        raise
 
     return {
         "client": client,
