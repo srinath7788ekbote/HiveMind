@@ -1,0 +1,5 @@
+consumer:
+  security-queue:
+    eventhub:
+      endpoint: dfs-secaas-dev-ehnamespace.servicebus.windows.net
+      name: dfs-secaas-dev-ehub-devbridge

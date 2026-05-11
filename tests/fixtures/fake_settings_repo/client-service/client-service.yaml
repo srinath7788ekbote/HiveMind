@@ -1,0 +1,15 @@
+spring:
+  mail:
+    host: 10.198.52.37
+    port: 587
+consumer:
+  filings-analysis-service:
+    servicebus:
+      enabled: true
+      endpoint: sb-dfin-eus2-npd-foxt.servicebus.windows.net
+      topicName: gail-ad-qa
+      subscriptionName: gail-ad-local-sub
+security:
+  oauth2:
+    salesforce:
+      access-token-uri: https://test.salesforce.com/services/oauth2/token

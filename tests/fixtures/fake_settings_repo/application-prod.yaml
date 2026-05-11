@@ -1,0 +1,6 @@
+app:
+  service:
+    client-service:
+      url: https://client-service-prod:8080
+    master-service:
+      url: https://master-service-prod:8080

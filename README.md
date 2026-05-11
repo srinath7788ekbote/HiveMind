@@ -1,6 +1,6 @@
 # HiveMind — Local-First Multi-Agent SRE Assistant
 
-A local-first SRE knowledge assistant powered by GitHub Copilot Chat and Claude Agent. Index your infrastructure repos (Terraform, Harness, Helm, NewRelic) and query them through 7 specialist AI agents, 21 MCP tools, and 17 skills — no external APIs, no cloud dependencies, zero data leaving your machine.
+A local-first SRE knowledge assistant powered by GitHub Copilot Chat and Claude Agent. Index your infrastructure repos (Terraform, Harness, Helm, Spring Cloud Config, NewRelic) and query them through 7 specialist AI agents, 21 MCP tools, and 17 skills — no external APIs, no cloud dependencies, zero data leaving your machine.
 
 HiveMind uses a 3-stage hybrid retrieval pipeline — ChromaDB semantic search + BM25 keyword search (top-20 each), merged via Reciprocal Rank Fusion (RRF, k=60), then reranked by a FlashRank cross-encoder — plus HTI (HiveMind Tree Intelligence) for precise structural navigation of YAML/HCL files. YAML and HCL files are chunked by structural boundaries (pipeline stages, Terraform resource blocks, Helm service sections) for coherent retrieval. Benchmark: 90/90 (100%) accuracy on hard infrastructure questions.
 

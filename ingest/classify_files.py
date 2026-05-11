@@ -63,6 +63,16 @@ def classify_file(file_path: str, repo_root: str = "") -> str:
     if name in SKIP_FILENAMES:
         return "skip"
 
+    # Spring Cloud Config settings files — YAML files in service-named directories
+    # Pattern: {service-name}/{service-name}[-{profile}].yaml or application[-{profile}].yaml
+    if suffix in ('.yaml', '.yml'):
+        parent_name = p.parent.name
+        stem = p.stem
+        if parent_name and stem.startswith(parent_name):
+            return "config"
+        if stem.startswith('application'):
+            return "config"
+
     # Pipeline YAML (pipeline.yaml in CI/CD directories)
     if name.lower() in ('pipeline.yaml', 'pipeline.yml'):
         return "pipeline"

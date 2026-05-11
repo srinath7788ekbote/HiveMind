@@ -1,0 +1,18 @@
+spring:
+  mail:
+    host: 10.198.52.37
+    port: 587
+consumer:
+  filings-analysis-service:
+    servicebus:
+      endpoint: sb-dfin-eus2-prd-rman.servicebus.windows.net
+      topicName: gail-ad-prod
+      subscriptionName: gail-ad-prod-sub
+security:
+  oauth2:
+    salesforce:
+      access-token-uri: https://login.salesforce.com/services/oauth2/token
+auth0:
+  m2m:
+    domain: https://prod.dfin.auth0app.com
+    client-id: W7Sk64g4sWS5LlX2siBNoKZW2pphBOOt

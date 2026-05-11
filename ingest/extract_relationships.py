@@ -26,6 +26,34 @@ READS_KV_SECRET = "READS_KV_SECRET"
 DEPENDS_ON = "DEPENDS_ON"
 OUTPUTS_TO = "OUTPUTS_TO"
 REFERENCES = "REFERENCES"
+DEFINES_CONFIG = "DEFINES_CONFIG"
+OVERRIDES_FOR_ENV = "OVERRIDES_FOR_ENV"
+CONNECTS_TO = "CONNECTS_TO"
+
+
+# Known Spring profile names for settings overlay detection
+_SPRING_PROFILES = frozenset({
+    "prod", "proddr", "dev", "qa", "perf", "demo", "preprod", "predemo",
+})
+
+# Endpoint patterns — compiled once
+_ENDPOINT_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r'[\w.-]+\.servicebus\.windows\.net'), "service_bus"),
+    (re.compile(r'[\w.-]+\.database\.azure\.com'), "database"),
+    (re.compile(r'[\w.-]+\.redis\.cache\.windows\.net'), "redis"),
+    (re.compile(r'[\w.-]+\.blob\.core\.windows\.net'), "storage"),
+    (re.compile(r'https?://[\w.-]*salesforce\.com[\w/.-]*'), "salesforce"),
+    (re.compile(r'https?://login[\w.-]*\.dfinsolutions\.com[\w/.-]*'), "auth0"),
+    (re.compile(r'[\w.-]+\.auth0app\.com[\w/.-]*'), "auth0"),
+    (re.compile(r'[\w.-]+\.azurewebsites\.net'), "app_service"),
+    (re.compile(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?'), "internal_endpoint"),
+]
+
+# YAML key fragments that indicate interesting config properties
+_CONFIG_KEY_INDICATORS = {
+    "endpoint", "url", "host", "namespace", "connection-string",
+    "domain", "base-url", "access-token-uri",
+}
 
 
 def _extract_from_pipeline(file_path: Path, repo_root: Path) -> list[dict]:
@@ -202,6 +230,184 @@ def _extract_from_helm_template(file_path: Path, repo_root: Path) -> list[dict]:
     return edges
 
 
+def _flatten_yaml(data, prefix=""):
+    """Recursively flatten a YAML dict into (dotted_key, value) pairs."""
+    items = []
+    if isinstance(data, dict):
+        for k, v in data.items():
+            new_key = f"{prefix}.{k}" if prefix else str(k)
+            items.extend(_flatten_yaml(v, new_key))
+    elif isinstance(data, list):
+        for i, v in enumerate(data):
+            new_key = f"{prefix}[{i}]"
+            items.extend(_flatten_yaml(v, new_key))
+    else:
+        items.append((prefix, data))
+    return items
+
+
+def _detect_endpoint(value: str) -> Optional[tuple[str, str]]:
+    """Check if a string value matches a known endpoint pattern.
+
+    Returns (endpoint_value, endpoint_type) or None.
+    """
+    for pattern, ep_type in _ENDPOINT_PATTERNS:
+        m = pattern.search(value)
+        if m:
+            return (m.group(0), ep_type)
+    return None
+
+
+def _parse_settings_filename(file_path: Path) -> tuple[Optional[str], Optional[str]]:
+    """Parse a settings filename into (service_name, profile).
+
+    Examples:
+        client-service-prod.yaml → ("client-service", "prod")
+        client-service.yaml → ("client-service", None)
+        application-prod.yaml → ("application", "prod")
+        application.yaml → ("application", None)
+    """
+    stem = file_path.stem
+    parent_name = file_path.parent.name
+
+    # If it's an application[-profile].yaml at any level
+    if stem.startswith("application"):
+        rest = stem[len("application"):]
+        if rest == "":
+            return ("application", None)
+        if rest.startswith("-"):
+            profile = rest[1:]
+            if profile in _SPRING_PROFILES:
+                return ("application", profile)
+        return ("application", None)
+
+    # Service-named files: {parent_name}[-profile].yaml
+    if parent_name and stem.startswith(parent_name):
+        rest = stem[len(parent_name):]
+        if rest == "":
+            return (parent_name, None)
+        if rest.startswith("-"):
+            profile = rest[1:]
+            if profile in _SPRING_PROFILES:
+                return (parent_name, profile)
+        return (parent_name, None)
+
+    return (None, None)
+
+
+def _extract_from_settings(file_path: Path, repo_root: Path) -> list[dict]:
+    """Extract relationships from a Spring Cloud Config settings file.
+
+    Parses YAML property files to find:
+    - External endpoints (service bus, database, redis, etc.)
+    - Environment overlay relationships (prod → proddr)
+    - Config property definitions for critical paths
+
+    Args:
+        file_path: Absolute path to the settings YAML file.
+        repo_root: Absolute path to the settings repo root.
+
+    Returns:
+        List of edge dicts.
+    """
+    edges = []
+    try:
+        content = file_path.read_text(encoding='utf-8')
+    except (OSError, UnicodeDecodeError):
+        return edges
+
+    if not content.strip():
+        return edges
+
+    # Parse YAML — handle Spring placeholders like ${VAR} gracefully
+    try:
+        from ruamel.yaml import YAML
+        yaml = YAML()
+        yaml.allow_duplicate_keys = True
+        data = yaml.load(content)
+    except Exception:
+        return edges
+
+    if not isinstance(data, dict):
+        return edges
+
+    rel_path = str(file_path.relative_to(repo_root))
+    repo_name = repo_root.name
+    source_id = f"config:{rel_path}"
+
+    service_name, profile = _parse_settings_filename(file_path)
+
+    # Create DEFINES_CONFIG edge from file to service
+    if service_name and service_name != "application":
+        edges.append({
+            "source": source_id,
+            "target": service_name,
+            "edge_type": DEFINES_CONFIG,
+            "file": rel_path,
+            "repo": repo_name,
+            "service": service_name,
+            "profile": profile or "default",
+        })
+
+    # Detect overlay → base relationships
+    if profile:
+        # This overlay file overrides the base file
+        if service_name == "application":
+            base_file = file_path.parent / "application.yaml"
+        else:
+            base_file = file_path.parent / f"{service_name}.yaml"
+
+        if base_file.exists():
+            base_rel = str(base_file.relative_to(repo_root))
+            edges.append({
+                "source": source_id,
+                "target": f"config:{base_rel}",
+                "edge_type": OVERRIDES_FOR_ENV,
+                "file": rel_path,
+                "repo": repo_name,
+                "profile": profile,
+            })
+
+    # Flatten YAML and scan for endpoints + config properties
+    flat = _flatten_yaml(data)
+    for key_path, value in flat:
+        if not isinstance(value, str):
+            # Also check numeric values formatted as IP:port
+            if value is not None:
+                value = str(value)
+            else:
+                continue
+
+        # Check for endpoint patterns
+        ep = _detect_endpoint(value)
+        if ep:
+            ep_value, ep_type = ep
+            edges.append({
+                "source": source_id,
+                "target": f"endpoint:{ep_value}",
+                "edge_type": CONNECTS_TO,
+                "file": rel_path,
+                "repo": repo_name,
+                "yaml_key_path": key_path,
+                "endpoint_type": ep_type,
+            })
+
+        # Check if key path indicates a config property worth indexing
+        key_lower = key_path.lower()
+        if any(indicator in key_lower for indicator in _CONFIG_KEY_INDICATORS):
+            edges.append({
+                "source": source_id,
+                "target": f"config_prop:{key_path}",
+                "edge_type": DEFINES_CONFIG,
+                "file": rel_path,
+                "repo": repo_name,
+                "yaml_key_path": key_path,
+                "value": value,
+            })
+
+    return edges
+
+
 def extract_relationships(
     repo_path: str,
     file_classifications: Optional[list[dict]] = None,
@@ -243,6 +449,8 @@ def extract_relationships(
             elif cls in ("helm_chart", "helm_values", "template") or "templates" in f.parts:
                 if f.suffix in (".yaml", ".yml"):
                     edges.extend(_extract_from_helm_template(f, repo))
+            elif cls == "config":
+                edges.extend(_extract_from_settings(f, repo))
         return edges
 
     # Full repo scan (no file list provided)
@@ -265,6 +473,21 @@ def extract_relationships(
                 edges.extend(_extract_from_helm_template(f, repo))
             for f in td.rglob("*.yml"):
                 edges.extend(_extract_from_helm_template(f, repo))
+
+    # Process Spring Cloud Config settings files
+    # Scan for YAML files that match settings naming conventions
+    for f in repo.rglob("*.yaml"):
+        if "templates" in f.parts or f.name in ("Chart.yaml", "values.yaml"):
+            continue
+        svc_name, _ = _parse_settings_filename(f)
+        if svc_name is not None:
+            edges.extend(_extract_from_settings(f, repo))
+    for f in repo.rglob("*.yml"):
+        if "templates" in f.parts or f.name in ("Chart.yml", "values.yml"):
+            continue
+        svc_name, _ = _parse_settings_filename(f)
+        if svc_name is not None:
+            edges.extend(_extract_from_settings(f, repo))
 
     return edges
 
@@ -323,6 +546,12 @@ def save_to_graph_db(edges: list[dict], db_path: str) -> None:
             node_type = "k8s_secret"
         elif node_id.startswith("kv_data:"):
             node_type = "kv_data_source"
+        elif node_id.startswith("config:"):
+            node_type = "config_file"
+        elif node_id.startswith("endpoint:"):
+            node_type = "external_endpoint"
+        elif node_id.startswith("config_prop:"):
+            node_type = "config_property"
         elif node_id.endswith(".tf"):
             node_type = "terraform_file"
         elif node_id.endswith(".yaml") or node_id.endswith(".yml"):

@@ -1,0 +1,14 @@
+spring:
+  mail:
+    host: 10.198.140.37
+    port: 587
+consumer:
+  filings-analysis-service:
+    servicebus:
+      endpoint: sb-dfin-eus2-prd-rman.servicebus.windows.net
+      topicName: gail-ad-prod
+      subscriptionName: gail-ad-prod-sub
+auth0:
+  m2m:
+    domain: https://prod.dfin.auth0app.com
+    client-id: 5b6ieuIbtwznFZ26hLh4Pxo94kzdrHwy

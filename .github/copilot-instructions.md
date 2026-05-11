@@ -407,14 +407,68 @@ Copilot can call these tools directly — no extension, slash commands, or parti
 | `hivemind_hti_get_skeleton` | Get structural skeleton of YAML/HCL files (keys + paths, no values) |
 | `hivemind_hti_fetch_nodes` | Fetch full node content by exact path from a skeleton |
 
+### Hawkeye Pipeline Observability Tools (25)
+
+These tools connect to the live Harness API via the Hawkeye subprocess MCP server.
+Use them when a user provides a Harness pipeline URL or asks about live pipeline state.
+
+| MCP Tool | Purpose |
+|----------|---------|
+| `hivemind_hawkeye_diagnose` | **THE key tool** — unified pipeline failure diagnosis (accepts URL or execution_id) |
+| `hivemind_hawkeye_investigate_failure` | Deep failure triage with parallel data gathering |
+| `hivemind_hawkeye_get_execution` | Get full execution details — status, stages, failures |
+| `hivemind_hawkeye_get_stage_detail` | Step-by-step breakdown of a specific stage |
+| `hivemind_hawkeye_get_step_logs` | Get step execution info, script source, outputs |
+| `hivemind_hawkeye_get_execution_inputs` | Runtime input YAML for an execution |
+| `hivemind_hawkeye_list_recent_executions` | Recent runs with optional status filter |
+| `hivemind_hawkeye_get_all_stages` | All stages with steps in one call |
+| `hivemind_hawkeye_get_child_execution` | Follow child pipeline executions |
+| `hivemind_hawkeye_check_approvals` | Check approval gate status |
+| `hivemind_hawkeye_compare_executions` | Diff two pipeline runs |
+| `hivemind_hawkeye_get_failure_pattern` | Recurring failure analysis |
+| `hivemind_hawkeye_get_pipeline_definition` | Pipeline YAML definition |
+| `hivemind_hawkeye_list_pipelines` | List/search pipelines in the project |
+| `hivemind_hawkeye_get_input_sets` | Available input sets for a pipeline |
+| `hivemind_hawkeye_connect_account` | Switch active Harness profile |
+| `hivemind_hawkeye_list_profiles` | List configured profiles |
+| `hivemind_hawkeye_list_delegates` | List delegates with health status |
+| `hivemind_hawkeye_check_delegate` | Check specific delegate health (fuzzy match) |
+| `hivemind_hawkeye_list_connectors` | List connectors with connectivity status |
+| `hivemind_hawkeye_check_connector` | Test a specific connector |
+| `hivemind_hawkeye_build_link` | Build Harness deep link URLs |
+| `hivemind_hawkeye_parse_terraform_plan` | Parse TF plan output from a pipeline |
+| `hivemind_hawkeye_release_precheck_report` | Combined release precheck report |
+| `hivemind_hawkeye_ping` | Health check — verify Hawkeye is running |
+
 ### Tool Calling Workflow
 
 1. **Always call `hivemind_get_active_client` first** to know which client to pass to other tools
 2. **For any branch-specific query** — call `hivemind_check_branch` first to validate the branch exists and is indexed
 3. **For any KB question** — call `hivemind_query_memory` first, then use specialised tools based on results
-4. **For create/modify tasks** — call read tools first to understand existing patterns, then generate content, then call `hivemind_write_file`
-5. **Stream your thinking** — explain which tools you are calling and why as you work
-6. **Cite file paths** from tool results in every answer
+4. **For Harness pipeline URLs** — call `hivemind_hawkeye_diagnose(url=...)` first, then cross-reference with KB
+5. **For create/modify tasks** — call read tools first to understand existing patterns, then generate content, then call `hivemind_write_file`
+6. **Stream your thinking** — explain which tools you are calling and why as you work
+7. **Cite file paths** from tool results in every answer
+
+### Hawkeye + HiveMind Combined Workflow
+
+When a user provides a Harness pipeline URL or mentions a pipeline failure:
+
+```
+Step 1: hivemind_hawkeye_diagnose(url="<harness_url>")
+        → Get full failure report: service name, failed stage, error message, logs
+
+Step 2: hivemind_query_memory(client="<client>", query="<service_name> <error_type>")
+        → Cross-reference with indexed Helm values, Terraform configs, secrets
+
+Step 3: hivemind_impact_analysis(client="<client>", entity="<service_name>")
+        → Assess blast radius and downstream dependencies
+
+Step 4: hivemind_get_secret_flow(client="<client>", secret="<secret_name>")
+        → If error is credential/secret related, trace the full lifecycle
+
+Step 5: Synthesize findings from live Hawkeye data + indexed KB knowledge
+```
 
 ### HTI vs KB Search — When to Use Which
 
@@ -1012,6 +1066,13 @@ YAML and HCL files are chunked by structural boundaries via `ingest/chunkers/str
 | "Save this investigation" | `hivemind_save_investigation` | (none) |
 | "What are the stages in X?" | `hivemind_hti_get_skeleton` | `hivemind_hti_fetch_nodes` (targeted node paths) |
 | "Show the config for X" | `hivemind_hti_get_skeleton` | `hivemind_hti_fetch_nodes` (targeted node paths) |
+| "What config value does X use?" | `hivemind_query_graph` (with `endpoint:` or `config_prop:` prefix) | `hivemind_query_memory` |
+| "What connects to endpoint X?" | `hivemind_query_graph` (entity=`endpoint:X`, direction=`in`) | `hivemind_impact_analysis` |
+| "Why did this pipeline fail?" (with URL) | `hivemind_hawkeye_diagnose(url=...)` | `hivemind_query_memory` + `hivemind_impact_analysis` |
+| "Check delegate health" | `hivemind_hawkeye_list_delegates` | `hivemind_hawkeye_check_delegate(name=...)` |
+| "Show recent pipeline runs" | `hivemind_hawkeye_list_recent_executions` | `hivemind_hawkeye_get_execution` |
+| "Compare two pipeline runs" | `hivemind_hawkeye_compare_executions` | `hivemind_query_memory` |
+| "Show Terraform plan" | `hivemind_hawkeye_parse_terraform_plan(url=...)` | (none) |
 
 
 ---
@@ -1049,3 +1110,22 @@ if was_redirected:
 | KB returns partial results | Present what was found with `🎯 Confidence: MEDIUM`. Explicitly list what is missing: `"⚠️ Missing from KB: <what was expected but not found>."` |
 | Multiple root cause candidates | Present each hypothesis as a numbered option with its own confidence level and evidence citations. Do NOT pick one without evidence. |
 | Tool call fails or times out | Log the failure, continue with remaining steps, and note: `"⚠️ Tool <tool_name> failed — <error>. Findings may be incomplete."` |
+
+
+---
+
+## CLAUDE_STATE.md Update Rule
+
+After completing any task that results in one or more of these changes:
+- MCP tool added or removed
+- Test added or removed
+- Agent added or removed
+- Skill added or removed
+- Enhancement/Improvement or Restructure
+- Known bug fixed or new bug found
+- New tool installed or configured
+
+Update `CLAUDE_STATE.md` in the repo root as the **LAST** step, after doc-sync.
+Recount from actual code (count `@mcp.tool()` decorators, count `def test_` functions).
+Only update the fields that changed. Update the "Last updated" date.
+Do not rewrite sections that did not change.

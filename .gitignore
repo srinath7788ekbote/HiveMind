@@ -68,6 +68,7 @@ memory/*/investigations/
 .env.*
 *.local
 CLAUDE.local.md
+CLAUDE_STATE.md
 
 # ============================================
 # VS Code extension build artifacts (legacy)
@@ -97,3 +98,6 @@ repos/
 
 # Test cache
 .pytest_cache/
+
+# Graphify output
+graphify-out/

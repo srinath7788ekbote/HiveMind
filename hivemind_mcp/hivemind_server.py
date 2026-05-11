@@ -53,6 +53,7 @@ from scripts.sync_kb import check_and_sync_if_stale
 
 # HTI (Tree Intelligence) imports
 from hivemind_mcp.hti.utils import get_hti_connection
+from hivemind_mcp.hawkeye_bridge import get_bridge, hawkeye_available
 
 # ---------------------------------------------------------------------------
 # ChromaDB availability check (printed once at import time)
@@ -984,6 +985,454 @@ async def hivemind_hti_fetch_nodes(
 
 
 # ---------------------------------------------------------------------------
+# Hawkeye Pipeline Observability Tools (MCP-to-MCP bridge)
+# ---------------------------------------------------------------------------
+# These tools proxy calls to the Hawkeye MCP server running as a subprocess.
+# Hawkeye connects to Harness APIs to fetch pipeline execution data, logs,
+# and investigation results.  Each tool here is a thin async wrapper.
+# ---------------------------------------------------------------------------
+
+@mcp_server.tool()
+async def hivemind_hawkeye_diagnose(
+    url: str = "",
+    execution_id: str = "",
+    mode: str = "full",
+    include_logs: bool = True,
+) -> str:
+    """Unified pipeline diagnosis — single-call failure investigation via Hawkeye.
+
+    Accepts a Harness UI URL (preferred — just paste the URL) or an execution_id.
+    Fetches full execution detail, failed stages/steps, console logs, pipeline
+    history, and synthesizes a failure analysis.
+
+    Modes:
+    - mode="summary": Execution overview, failed stage/step identification, quick analysis.
+    - mode="full": Everything from summary PLUS step details, child pipeline following,
+      rollback detection, console logs, and deep links.
+
+    Args:
+        url: Harness UI URL (preferred).
+        execution_id: Pipeline execution ID (alternative to URL).
+        mode: "summary" or "full" (default: "full").
+        include_logs: Include console logs in full mode (default: True).
+    """
+    bridge = get_bridge()
+    return await bridge.call_tool("hawkeye_diagnose", {
+        "url": url, "execution_id": execution_id,
+        "mode": mode, "include_logs": include_logs,
+    })
+
+
+@mcp_server.tool()
+async def hivemind_hawkeye_investigate_failure(
+    url: str = "",
+    execution_id: str = "",
+) -> str:
+    """Deep failure triage with parallel data gathering via Hawkeye.
+
+    Fires MULTIPLE API calls in parallel: full execution detail, execution graph,
+    step logs for ALL failed steps, and last 5 executions of the same pipeline.
+    Synthesizes everything into a unified failure investigation report.
+
+    Args:
+        url: Harness UI URL (preferred).
+        execution_id: Pipeline execution ID (alternative to URL).
+    """
+    bridge = get_bridge()
+    return await bridge.call_tool("hawkeye_investigate_failure", {
+        "url": url, "execution_id": execution_id,
+    })
+
+
+@mcp_server.tool()
+async def hivemind_hawkeye_get_execution(
+    url: str = "",
+    execution_id: str = "",
+) -> str:
+    """Get full pipeline execution details — status, stages, failures, and deep link.
+
+    Args:
+        url: Harness UI URL (preferred).
+        execution_id: Pipeline execution ID (alternative to URL).
+    """
+    bridge = get_bridge()
+    return await bridge.call_tool("hawkeye_get_execution", {
+        "url": url, "execution_id": execution_id,
+    })
+
+
+@mcp_server.tool()
+async def hivemind_hawkeye_get_stage_detail(
+    url: str = "",
+    execution_id: str = "",
+    stage_id: str = "",
+) -> str:
+    """Get detailed step-by-step breakdown of a pipeline stage.
+
+    Args:
+        url: Harness UI URL with stage param (preferred).
+        execution_id: Pipeline execution ID.
+        stage_id: Stage identifier.
+    """
+    bridge = get_bridge()
+    return await bridge.call_tool("hawkeye_get_stage_detail", {
+        "url": url, "execution_id": execution_id, "stage_id": stage_id,
+    })
+
+
+@mcp_server.tool()
+async def hivemind_hawkeye_get_step_logs(
+    url: str = "",
+    execution_id: str = "",
+    stage_id: str = "",
+    step_id: str = "",
+) -> str:
+    """Get detailed step execution information including script source, outputs, and failures.
+
+    Args:
+        url: Harness UI URL with stage and step params (preferred).
+        execution_id: Pipeline execution ID.
+        stage_id: Stage identifier.
+        step_id: Step identifier.
+    """
+    bridge = get_bridge()
+    return await bridge.call_tool("hawkeye_get_step_logs", {
+        "url": url, "execution_id": execution_id,
+        "stage_id": stage_id, "step_id": step_id,
+    })
+
+
+@mcp_server.tool()
+async def hivemind_hawkeye_get_execution_inputs(
+    url: str = "",
+    execution_id: str = "",
+) -> str:
+    """Get the runtime input YAML used for a specific pipeline execution.
+
+    Args:
+        url: Harness UI URL (preferred).
+        execution_id: Pipeline execution ID.
+    """
+    bridge = get_bridge()
+    return await bridge.call_tool("hawkeye_get_execution_inputs", {
+        "url": url, "execution_id": execution_id,
+    })
+
+
+@mcp_server.tool()
+async def hivemind_hawkeye_list_recent_executions(
+    pipeline_id: str,
+    limit: int = 10,
+    status: str = "",
+) -> str:
+    """List recent pipeline executions with optional status filter.
+
+    Args:
+        pipeline_id: Pipeline identifier (supports fuzzy matching).
+        limit: Maximum number of executions to return (default: 10).
+        status: Filter by status (e.g., "Failed", "Success"). Empty for all.
+    """
+    bridge = get_bridge()
+    args: dict = {"pipeline_id": pipeline_id, "limit": limit}
+    if status:
+        args["status"] = status
+    return await bridge.call_tool("hawkeye_list_recent_executions", args)
+
+
+@mcp_server.tool()
+async def hivemind_hawkeye_get_all_stages(
+    url: str = "",
+    execution_id: str = "",
+) -> str:
+    """Get all stages with steps in one call for a pipeline execution.
+
+    Args:
+        url: Harness UI URL (preferred).
+        execution_id: Pipeline execution ID.
+    """
+    bridge = get_bridge()
+    return await bridge.call_tool("hawkeye_get_all_stages", {
+        "url": url, "execution_id": execution_id,
+    })
+
+
+@mcp_server.tool()
+async def hivemind_hawkeye_get_child_execution(
+    url: str = "",
+    execution_id: str = "",
+    stage_id: str = "",
+) -> str:
+    """Follow child pipeline executions from a parent pipeline stage.
+
+    Args:
+        url: Harness UI URL (preferred).
+        execution_id: Parent pipeline execution ID.
+        stage_id: Stage that triggered the child pipeline.
+    """
+    bridge = get_bridge()
+    return await bridge.call_tool("hawkeye_get_child_execution", {
+        "url": url, "execution_id": execution_id, "stage_id": stage_id,
+    })
+
+
+@mcp_server.tool()
+async def hivemind_hawkeye_check_approvals(
+    url: str = "",
+    execution_id: str = "",
+) -> str:
+    """Check pending, completed, or rejected approval gates in a pipeline execution.
+
+    Args:
+        url: Harness UI URL (preferred).
+        execution_id: Pipeline execution ID.
+    """
+    bridge = get_bridge()
+    return await bridge.call_tool("hawkeye_check_approvals", {
+        "url": url, "execution_id": execution_id,
+    })
+
+
+@mcp_server.tool()
+async def hivemind_hawkeye_compare_executions(
+    execution_id_1: str,
+    execution_id_2: str,
+) -> str:
+    """Diff two pipeline executions — compare stages, steps, and outcomes.
+
+    Args:
+        execution_id_1: First execution ID.
+        execution_id_2: Second execution ID.
+    """
+    bridge = get_bridge()
+    return await bridge.call_tool("hawkeye_compare_executions", {
+        "execution_id_1": execution_id_1, "execution_id_2": execution_id_2,
+    })
+
+
+@mcp_server.tool()
+async def hivemind_hawkeye_get_failure_pattern(
+    pipeline_id: str,
+    limit: int = 10,
+) -> str:
+    """Detect recurring failure patterns across recent pipeline executions.
+
+    Args:
+        pipeline_id: Pipeline identifier (supports fuzzy matching).
+        limit: Number of recent executions to analyze (default: 10).
+    """
+    bridge = get_bridge()
+    return await bridge.call_tool("hawkeye_get_failure_pattern", {
+        "pipeline_id": pipeline_id, "limit": limit,
+    })
+
+
+@mcp_server.tool()
+async def hivemind_hawkeye_get_pipeline_definition(
+    pipeline_id: str,
+    branch: str = "",
+) -> str:
+    """Get the YAML definition of a pipeline.
+
+    Args:
+        pipeline_id: Pipeline identifier (supports fuzzy matching).
+        branch: Git branch for remote pipelines (optional).
+    """
+    bridge = get_bridge()
+    args: dict = {"pipeline_id": pipeline_id}
+    if branch:
+        args["branch"] = branch
+    return await bridge.call_tool("hawkeye_get_pipeline_definition", args)
+
+
+@mcp_server.tool()
+async def hivemind_hawkeye_list_pipelines(
+    search: str = "",
+    module: str = "",
+) -> str:
+    """List all pipelines in the current Harness project.
+
+    Args:
+        search: Search term to filter pipelines by name.
+        module: Filter by module ("CI" or "CD").
+    """
+    bridge = get_bridge()
+    args: dict = {}
+    if search:
+        args["search"] = search
+    if module:
+        args["module"] = module
+    return await bridge.call_tool("hawkeye_list_pipelines", args)
+
+
+@mcp_server.tool()
+async def hivemind_hawkeye_get_input_sets(
+    pipeline_id: str,
+) -> str:
+    """Get all available input sets for a pipeline.
+
+    Args:
+        pipeline_id: Pipeline identifier (supports fuzzy matching).
+    """
+    bridge = get_bridge()
+    return await bridge.call_tool("hawkeye_get_input_sets", {
+        "pipeline_id": pipeline_id,
+    })
+
+
+@mcp_server.tool()
+async def hivemind_hawkeye_connect_account(
+    profile_name: str,
+) -> str:
+    """Switch the active Hawkeye/Harness profile and test connectivity.
+
+    Tokens must be pre-configured via 'make connect' in the Hawkeye project.
+    This tool only switches between pre-configured profiles.
+
+    Args:
+        profile_name: Name of the profile to activate.
+    """
+    bridge = get_bridge()
+    return await bridge.call_tool("hawkeye_connect_account", {
+        "profile_name": profile_name,
+    })
+
+
+@mcp_server.tool()
+async def hivemind_hawkeye_list_profiles() -> str:
+    """List all configured Hawkeye/Harness profiles with active indicator."""
+    bridge = get_bridge()
+    return await bridge.call_tool("hawkeye_list_profiles", {})
+
+
+@mcp_server.tool()
+async def hivemind_hawkeye_list_delegates() -> str:
+    """List all Harness delegate groups with health status.
+
+    Returns delegate name, connection status, last heartbeat, type, and tags.
+    """
+    bridge = get_bridge()
+    return await bridge.call_tool("hawkeye_list_delegates", {})
+
+
+@mcp_server.tool()
+async def hivemind_hawkeye_check_delegate(
+    name: str,
+) -> str:
+    """Check health of a specific Harness delegate by name (supports fuzzy matching).
+
+    Args:
+        name: Full or partial delegate name (e.g., "tanr" for "newad-eswd-tanr-dlgt").
+    """
+    bridge = get_bridge()
+    return await bridge.call_tool("hawkeye_check_delegate", {"name": name})
+
+
+@mcp_server.tool()
+async def hivemind_hawkeye_list_connectors(
+    search: str = "",
+) -> str:
+    """List Harness connectors with their connectivity status.
+
+    Args:
+        search: Search term to filter connectors by name.
+    """
+    bridge = get_bridge()
+    return await bridge.call_tool("hawkeye_list_connectors", {
+        "search": search,
+    })
+
+
+@mcp_server.tool()
+async def hivemind_hawkeye_check_connector(
+    identifier: str,
+) -> str:
+    """Test connectivity of a specific Harness connector.
+
+    Args:
+        identifier: Connector identifier (e.g., "account.GHConnector" or project-scoped ID).
+    """
+    bridge = get_bridge()
+    return await bridge.call_tool("hawkeye_check_connector", {
+        "identifier": identifier,
+    })
+
+
+@mcp_server.tool()
+async def hivemind_hawkeye_build_link(
+    pipeline_id: str,
+    execution_id: str = "",
+    stage_id: str = "",
+    step_id: str = "",
+) -> str:
+    """Build a Harness deep link URL from pipeline/execution/stage/step components.
+
+    Args:
+        pipeline_id: Pipeline identifier.
+        execution_id: Execution ID (optional — omit for pipeline-level link).
+        stage_id: Stage ID (optional).
+        step_id: Step ID (optional).
+    """
+    bridge = get_bridge()
+    args: dict = {"pipeline_id": pipeline_id}
+    if execution_id:
+        args["execution_id"] = execution_id
+    if stage_id:
+        args["stage_id"] = stage_id
+    if step_id:
+        args["step_id"] = step_id
+    return await bridge.call_tool("hawkeye_build_link", args)
+
+
+@mcp_server.tool()
+async def hivemind_hawkeye_parse_terraform_plan(
+    url: str = "",
+    execution_id: str = "",
+) -> str:
+    """Parse Terraform plan output from a pipeline execution.
+
+    Extracts plan summary per layer (X to add, Y to change, Z to destroy).
+
+    Args:
+        url: Harness UI URL (preferred).
+        execution_id: Pipeline execution ID.
+    """
+    bridge = get_bridge()
+    return await bridge.call_tool("hawkeye_parse_terraform_plan", {
+        "url": url, "execution_id": execution_id,
+    })
+
+
+@mcp_server.tool()
+async def hivemind_hawkeye_release_precheck_report(
+    infra_builder_execution_id: str,
+    infra_createenv_execution_id: str,
+    branch: str = "",
+) -> str:
+    """Generate a combined release precheck report from two pipeline executions.
+
+    Args:
+        infra_builder_execution_id: Infra builder pipeline execution ID.
+        infra_createenv_execution_id: Infra create-env pipeline execution ID.
+        branch: Release branch name (optional, for context).
+    """
+    bridge = get_bridge()
+    args: dict = {
+        "infra_builder_execution_id": infra_builder_execution_id,
+        "infra_createenv_execution_id": infra_createenv_execution_id,
+    }
+    if branch:
+        args["branch"] = branch
+    return await bridge.call_tool("hawkeye_release_precheck_report", args)
+
+
+@mcp_server.tool()
+async def hivemind_hawkeye_ping() -> str:
+    """Health check — verify Hawkeye MCP server is running and connected."""
+    bridge = get_bridge()
+    return await bridge.call_tool("ping", {})
+
+
+# ---------------------------------------------------------------------------
 TOOL_REGISTRY = {
     "hivemind_query_memory": hivemind_query_memory,
     "hivemind_query_graph": hivemind_query_graph,
@@ -1006,35 +1455,77 @@ TOOL_REGISTRY = {
     "hivemind_recall_investigation": hivemind_recall_investigation,
     "hivemind_hti_get_skeleton": hivemind_hti_get_skeleton,
     "hivemind_hti_fetch_nodes": hivemind_hti_fetch_nodes,
+    # Hawkeye pipeline observability tools (MCP-to-MCP bridge)
+    "hivemind_hawkeye_diagnose": hivemind_hawkeye_diagnose,
+    "hivemind_hawkeye_investigate_failure": hivemind_hawkeye_investigate_failure,
+    "hivemind_hawkeye_get_execution": hivemind_hawkeye_get_execution,
+    "hivemind_hawkeye_get_stage_detail": hivemind_hawkeye_get_stage_detail,
+    "hivemind_hawkeye_get_step_logs": hivemind_hawkeye_get_step_logs,
+    "hivemind_hawkeye_get_execution_inputs": hivemind_hawkeye_get_execution_inputs,
+    "hivemind_hawkeye_list_recent_executions": hivemind_hawkeye_list_recent_executions,
+    "hivemind_hawkeye_get_all_stages": hivemind_hawkeye_get_all_stages,
+    "hivemind_hawkeye_get_child_execution": hivemind_hawkeye_get_child_execution,
+    "hivemind_hawkeye_check_approvals": hivemind_hawkeye_check_approvals,
+    "hivemind_hawkeye_compare_executions": hivemind_hawkeye_compare_executions,
+    "hivemind_hawkeye_get_failure_pattern": hivemind_hawkeye_get_failure_pattern,
+    "hivemind_hawkeye_get_pipeline_definition": hivemind_hawkeye_get_pipeline_definition,
+    "hivemind_hawkeye_list_pipelines": hivemind_hawkeye_list_pipelines,
+    "hivemind_hawkeye_get_input_sets": hivemind_hawkeye_get_input_sets,
+    "hivemind_hawkeye_connect_account": hivemind_hawkeye_connect_account,
+    "hivemind_hawkeye_list_profiles": hivemind_hawkeye_list_profiles,
+    "hivemind_hawkeye_list_delegates": hivemind_hawkeye_list_delegates,
+    "hivemind_hawkeye_check_delegate": hivemind_hawkeye_check_delegate,
+    "hivemind_hawkeye_list_connectors": hivemind_hawkeye_list_connectors,
+    "hivemind_hawkeye_check_connector": hivemind_hawkeye_check_connector,
+    "hivemind_hawkeye_build_link": hivemind_hawkeye_build_link,
+    "hivemind_hawkeye_parse_terraform_plan": hivemind_hawkeye_parse_terraform_plan,
+    "hivemind_hawkeye_release_precheck_report": hivemind_hawkeye_release_precheck_report,
+    "hivemind_hawkeye_ping": hivemind_hawkeye_ping,
 }
+
+
+# Expected tool counts
+_HIVEMIND_TOOL_COUNT = 21
+_HAWKEYE_TOOL_COUNT = 25
+_TOTAL_TOOL_COUNT = _HIVEMIND_TOOL_COUNT + _HAWKEYE_TOOL_COUNT
 
 
 def run_self_test() -> bool:
     """Validate all tool imports and registrations.
 
-    Returns True if all 13 tools are healthy, False otherwise.
+    Returns True if all tools are healthy, False otherwise.
     Prints status for each tool.
     """
     print("HiveMind MCP Server — Self Test")
     print("=" * 50)
 
     all_ok = True
-    expected_tools = sorted(TOOL_REGISTRY.keys())
+    hivemind_tools = sorted(k for k in TOOL_REGISTRY if not k.startswith("hivemind_hawkeye_"))
+    hawkeye_tools = sorted(k for k in TOOL_REGISTRY if k.startswith("hivemind_hawkeye_"))
 
-    for name in expected_tools:
+    print(f"\n  HiveMind core tools ({len(hivemind_tools)}/{_HIVEMIND_TOOL_COUNT}):")
+    for name in hivemind_tools:
         fn = TOOL_REGISTRY[name]
         if callable(fn):
-            print(f"  [OK] {name}")
+            print(f"    [OK] {name}")
         else:
-            print(f"  [FAIL] {name} — not callable")
+            print(f"    [FAIL] {name} — not callable")
             all_ok = False
 
-    # Verify the FastMCP server has them registered
-    registered_count = len(expected_tools)
-    print()
-    print(f"Tools registered: {registered_count}/21")
+    print(f"\n  Hawkeye bridge tools ({len(hawkeye_tools)}/{_HAWKEYE_TOOL_COUNT}):")
+    for name in hawkeye_tools:
+        fn = TOOL_REGISTRY[name]
+        if callable(fn):
+            print(f"    [OK] {name}")
+        else:
+            print(f"    [FAIL] {name} — not callable")
+            all_ok = False
 
-    if registered_count == 21 and all_ok:
+    registered_count = len(TOOL_REGISTRY)
+    print()
+    print(f"Tools registered: {registered_count}/{_TOTAL_TOOL_COUNT}")
+
+    if registered_count == _TOTAL_TOOL_COUNT and all_ok:
         print("All tools healthy.")
         return True
     else:

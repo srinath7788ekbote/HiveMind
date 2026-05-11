@@ -1,6 +1,6 @@
 # CLAUDE.md — Claude Agent Configuration for HiveMind
 
-HiveMind is a local-first SRE knowledge assistant that indexes infrastructure repos (Terraform, Harness pipelines, Helm charts, Kubernetes secrets) into a ChromaDB-backed knowledge base, then exposes 21 MCP tools for semantic search, dependency graph traversal, impact analysis, secret lifecycle tracing, and incident investigation across multi-repo, multi-branch client environments.
+HiveMind is a local-first SRE knowledge assistant that indexes infrastructure repos (Terraform, Harness pipelines, Helm charts, Kubernetes secrets, Spring Cloud Config settings) into a ChromaDB-backed knowledge base, then exposes 21 MCP tools + 25 Hawkeye pipeline observability tools (46 total) for semantic search, dependency graph traversal, impact analysis, secret lifecycle tracing, config lineage tracking, live pipeline diagnosis, and incident investigation across multi-repo, multi-branch client environments.
 
 ### Retrieval Pipeline
 
@@ -151,17 +151,45 @@ Agents now use **phased parallel execution** with a **shared investigation regis
 
 ***
 
-## MCP Tools (21 tools)
+## MCP Tools (46 tools: 21 HiveMind + 25 Hawkeye)
 
-All 21 HiveMind MCP tools are available via `.vscode/mcp.json`. The tools are shared between Copilot Chat and Claude Agent — no separate configuration needed. See `hivemind_mcp/hivemind_server.py` for tool definitions.
+All 46 tools are available via `.vscode/mcp.json`. The tools are shared between Copilot Chat and Claude Agent — no separate configuration needed. See `hivemind_mcp/hivemind_server.py` for tool definitions.
 
-Key tools: `hivemind_get_active_client`, `hivemind_query_memory`, `hivemind_query_graph`, `hivemind_get_entity`, `hivemind_search_files`, `hivemind_get_pipeline`, `hivemind_get_secret_flow`, `hivemind_impact_analysis`, `hivemind_diff_branches`, `hivemind_list_branches`, `hivemind_set_client`, `hivemind_write_file`, `hivemind_read_file`, `hivemind_propose_edit`, `hivemind_check_branch`, `hivemind_ensure_fresh`, `hivemind_get_active_branch`, `hivemind_save_investigation`, `hivemind_recall_investigation`, `hivemind_hti_get_skeleton`, `hivemind_hti_fetch_nodes`.
+**HiveMind core tools (21):** `hivemind_get_active_client`, `hivemind_query_memory`, `hivemind_query_graph`, `hivemind_get_entity`, `hivemind_search_files`, `hivemind_get_pipeline`, `hivemind_get_secret_flow`, `hivemind_impact_analysis`, `hivemind_diff_branches`, `hivemind_list_branches`, `hivemind_set_client`, `hivemind_write_file`, `hivemind_read_file`, `hivemind_propose_edit`, `hivemind_check_branch`, `hivemind_ensure_fresh`, `hivemind_get_active_branch`, `hivemind_save_investigation`, `hivemind_recall_investigation`, `hivemind_hti_get_skeleton`, `hivemind_hti_fetch_nodes`.
+
+**Hawkeye pipeline observability tools (25):** `hivemind_hawkeye_diagnose`, `hivemind_hawkeye_investigate_failure`, `hivemind_hawkeye_get_execution`, `hivemind_hawkeye_get_stage_detail`, `hivemind_hawkeye_get_step_logs`, `hivemind_hawkeye_get_execution_inputs`, `hivemind_hawkeye_list_recent_executions`, `hivemind_hawkeye_get_all_stages`, `hivemind_hawkeye_get_child_execution`, `hivemind_hawkeye_check_approvals`, `hivemind_hawkeye_compare_executions`, `hivemind_hawkeye_get_failure_pattern`, `hivemind_hawkeye_get_pipeline_definition`, `hivemind_hawkeye_list_pipelines`, `hivemind_hawkeye_get_input_sets`, `hivemind_hawkeye_connect_account`, `hivemind_hawkeye_list_profiles`, `hivemind_hawkeye_list_delegates`, `hivemind_hawkeye_check_delegate`, `hivemind_hawkeye_list_connectors`, `hivemind_hawkeye_check_connector`, `hivemind_hawkeye_build_link`, `hivemind_hawkeye_parse_terraform_plan`, `hivemind_hawkeye_release_precheck_report`, `hivemind_hawkeye_ping`.
 
 ### Tool Tiers (Quick Reference)
 
-* **Tier 1** (parallel-safe, read-only): query\_memory, query\_graph, get\_entity, search\_files, hti\_\*, check\_branch, list\_branches, read\_file, recall\_investigation, ensure\_fresh, get\_active\_\*
+* **Tier 1** (parallel-safe, read-only): query\_memory, query\_graph, get\_entity, search\_files, hti\_\*, check\_branch, list\_branches, read\_file, recall\_investigation, ensure\_fresh, get\_active\_\*, all hawkeye\_\* tools
 * **Tier 2** (serial, analysis): impact\_analysis, diff\_branches, get\_pipeline, get\_secret\_flow, save\_investigation, set\_client
 * **Tier 3** (user approval): write\_file, propose\_edit
+
+***
+
+## Hawkeye Integration (Pipeline Observability)
+
+Hawkeye is integrated as a subprocess MCP server via `hivemind_mcp/hawkeye_bridge.py`. It connects to the Harness API to fetch live pipeline execution data, logs, and investigation results.
+
+**Architecture:** HiveMind MCP Server → HawkeyeBridge (MCP client) → Hawkeye MCP Server (child process, stdio)
+
+**Key workflow — Pipeline failure investigation:**
+1. User provides a Harness URL or execution ID
+2. Call `hivemind_hawkeye_diagnose(url=...)` to get full failure analysis from live Harness APIs
+3. Extract service name, error type, and failed stage from the Hawkeye output
+4. Call `hivemind_query_memory` to cross-reference with KB (Helm values, Terraform, secrets)
+5. Call `hivemind_impact_analysis` to assess blast radius
+6. Synthesize findings from both live pipeline data AND indexed infrastructure knowledge
+
+**When to use Hawkeye tools:**
+- User provides a Harness pipeline URL → `hivemind_hawkeye_diagnose`
+- User asks about a specific execution → `hivemind_hawkeye_get_execution`
+- User asks about delegate health → `hivemind_hawkeye_list_delegates` / `hivemind_hawkeye_check_delegate`
+- User asks about connector status → `hivemind_hawkeye_list_connectors`
+- User wants Terraform plan summary → `hivemind_hawkeye_parse_terraform_plan`
+- User wants failure patterns → `hivemind_hawkeye_get_failure_pattern`
+
+**Configuration:** Hawkeye credentials are stored in `~/.hawkeye/profiles.json` (configured via `make connect` in the Hawkeye project). The bridge uses Hawkeye's own venv at `C:\Users\sekbote\Documents\Hawkeye\.venv\`.
 
 ***
 

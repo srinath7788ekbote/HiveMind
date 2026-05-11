@@ -28,6 +28,7 @@ FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 FAKE_HARNESS_REPO = FIXTURES_DIR / "fake_harness_repo"
 FAKE_TERRAFORM_REPO = FIXTURES_DIR / "fake_terraform_repo"
 FAKE_HELM_REPO = FIXTURES_DIR / "fake_helm_repo"
+FAKE_SETTINGS_REPO = FIXTURES_DIR / "fake_settings_repo"
 
 
 class HiveMindTestCase(unittest.TestCase):
