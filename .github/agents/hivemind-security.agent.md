@@ -45,6 +45,8 @@ You are the **Security Agent** -- specialist in RBAC, managed identities, Key Va
 
 ## Tools You Use
 
+### KB Tools (indexed repo knowledge)
+
 | Tool | When |
 |------|------|
 | `get_secret_flow` | To trace a service's full secret chain (KV -> K8s -> Helm) |
@@ -53,6 +55,14 @@ You are the **Security Agent** -- specialist in RBAC, managed identities, Key Va
 | `query_memory` | To search indexed content about identities, roles, secrets. Results are fused from BM25+ChromaDB via RRF, then reranked by FlashRank. Higher `flashrank_score` = more relevant to your query |
 | `get_entity` | To get details of a managed identity or role assignment entity |
 | `impact_analysis` | To find what depends on a secret or identity |
+
+### Sherlock Tools (live access verification)
+
+| Tool | When |
+|------|------|
+| `sherlock_search_logs` | Search for 401/403/unauthorized log entries |
+| `sherlock_get_service_golden_signals` | Check if error rate spiked (credential issue) |
+| `sherlock_get_k8s_health` | Pod crash due to secret mount failure |
 
 ## Investigation Process
 

@@ -111,41 +111,54 @@ def _load_config(client: str) -> dict:
 
     try:
         import yaml
-        return yaml.safe_load(content) or {}
+        config = yaml.safe_load(content) or {}
     except ImportError:
-        pass
+        config = None
 
-    # Manual YAML-like parsing for simple configs
-    config = {"repos": []}
-    current_repo = None
+    if config is None:
+        # Manual YAML-like parsing for simple configs
+        config = {"repos": []}
+        current_repo = None
 
-    for line in content.split("\n"):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
+        for line in content.split("\n"):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
 
-        if stripped.startswith("- name:"):
-            if current_repo:
-                config["repos"].append(current_repo)
-            current_repo = {
-                "name": stripped.split(":", 1)[1].strip().strip('"\''),
-                "branches": [],
-            }
-        elif current_repo and ":" in stripped:
-            key, val = stripped.split(":", 1)
-            key = key.strip()
-            val = val.strip().strip('"\'')
-            if key == "path":
-                current_repo["path"] = val
-            elif key == "type":
-                current_repo["type"] = val
-        elif current_repo and stripped.startswith("- ") and not stripped.startswith("- name:"):
-            branch = stripped[2:].strip().strip('"\'')
-            if branch:
-                current_repo.setdefault("branches", []).append(branch)
+            if stripped.startswith("- name:"):
+                if current_repo:
+                    config["repos"].append(current_repo)
+                current_repo = {
+                    "name": stripped.split(":", 1)[1].strip().strip('"\''),
+                    "branches": [],
+                }
+            elif current_repo and ":" in stripped:
+                key, val = stripped.split(":", 1)
+                key = key.strip()
+                val = val.strip().strip('"\'')
+                if key == "path":
+                    current_repo["path"] = val
+                elif key == "type":
+                    current_repo["type"] = val
+            elif current_repo and stripped.startswith("- ") and not stripped.startswith("- name:"):
+                branch = stripped[2:].strip().strip('"\'')
+                if branch:
+                    current_repo.setdefault("branches", []).append(branch)
 
-    if current_repo:
-        config["repos"].append(current_repo)
+        if current_repo:
+            config["repos"].append(current_repo)
+
+    # Resolve shared_branches: repos without explicit branches inherit the shared list
+    shared = config.get("shared_branches")
+    if shared:
+        for repo in config.get("repos", []):
+            if not repo.get("branches"):
+                branches = list(shared)
+                # If repo specifies default_branch, replace 'main' with that value
+                repo_default = repo.get("default_branch")
+                if repo_default and "main" in branches:
+                    branches[branches.index("main")] = repo_default
+                repo["branches"] = branches
 
     return config
 

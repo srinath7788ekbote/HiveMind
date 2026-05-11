@@ -92,10 +92,11 @@ class TestToolsAreAsync(unittest.TestCase):
             )
 
     def test_tool_count_is_21(self):
+        """21 HiveMind-core tool functions are imported and tested for async."""
         self.assertEqual(len(self.TOOL_FUNCTIONS), 21)
 
-    def test_registry_has_21_tools(self):
-        self.assertEqual(len(TOOL_REGISTRY), 21)
+    def test_registry_has_70_tools(self):
+        self.assertEqual(len(TOOL_REGISTRY), 70)
 
     def test_registry_values_are_callable(self):
         for name, fn in TOOL_REGISTRY.items():

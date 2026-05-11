@@ -54,6 +54,7 @@ from scripts.sync_kb import check_and_sync_if_stale
 # HTI (Tree Intelligence) imports
 from hivemind_mcp.hti.utils import get_hti_connection
 from hivemind_mcp.hawkeye_bridge import get_bridge, hawkeye_available
+from hivemind_mcp.sherlock_bridge import get_sherlock_bridge, sherlock_available
 
 # ---------------------------------------------------------------------------
 # ChromaDB availability check (printed once at import time)
@@ -1433,6 +1434,445 @@ async def hivemind_hawkeye_ping() -> str:
 
 
 # ---------------------------------------------------------------------------
+# Sherlock Observability Tools (MCP-to-MCP bridge)
+# ---------------------------------------------------------------------------
+# These tools proxy calls to the Sherlock MCP server running as a subprocess.
+# Sherlock connects to New Relic APIs to fetch APM, K8s, logs, alerts,
+# synthetics, and dependency data.  Each tool here is a thin async wrapper.
+# ---------------------------------------------------------------------------
+
+@mcp_server.tool()
+async def hivemind_sherlock_connect_account(
+    account_id: str = "",
+    api_key: str = "",
+    region: str = "US",
+    profile_name: str = "",
+    service_name: str = "",
+) -> str:
+    """Connect to a New Relic account via Sherlock.
+
+    Call this first — required before all other Sherlock tools.
+    Validates credentials, learns the account structure, and caches
+    intelligence.  Provide EITHER a saved profile_name (which loads
+    credentials from keychain) OR explicit account_id + api_key.
+
+    Args:
+        account_id: New Relic account ID.
+        api_key: New Relic User API key.
+        region: Data center region ("US" or "EU").
+        profile_name: Saved profile name (loads from keychain).
+        service_name: Service name to auto-resolve the account from memory.
+    """
+    bridge = get_sherlock_bridge()
+    args: dict = {}
+    if account_id:
+        args["account_id"] = account_id
+    if api_key:
+        args["api_key"] = api_key
+    if region:
+        args["region"] = region
+    if profile_name:
+        args["profile_name"] = profile_name
+    if service_name:
+        args["service_name"] = service_name
+    return await bridge.call_tool("connect_account", args)
+
+
+@mcp_server.tool()
+async def hivemind_sherlock_list_profiles() -> str:
+    """List all saved New Relic credential profiles via Sherlock."""
+    bridge = get_sherlock_bridge()
+    return await bridge.call_tool("list_profiles", {})
+
+
+@mcp_server.tool()
+async def hivemind_sherlock_learn_account() -> str:
+    """Discover ALL entity names, types, and relationships in the active New Relic account.
+
+    MUST be called before any investigation to get real service names, K8s
+    deployment names, synthetic monitor names, and entity relationships.
+    Results are cached — subsequent calls refresh the cache.
+    """
+    bridge = get_sherlock_bridge()
+    return await bridge.call_tool("learn_account", {})
+
+
+@mcp_server.tool()
+async def hivemind_sherlock_get_account_summary() -> str:
+    """Get complete intelligence summary for the active New Relic account."""
+    bridge = get_sherlock_bridge()
+    return await bridge.call_tool("get_account_summary", {})
+
+
+@mcp_server.tool()
+async def hivemind_sherlock_get_session_context(
+    service_name: str = "",
+    limit: int = 5,
+) -> str:
+    """Return investigation history from the current Sherlock session.
+
+    Use to answer follow-up questions without running a full new investigation.
+
+    Args:
+        service_name: Optional filter to a specific service.
+        limit: Max number of recent investigations to return (1-10).
+    """
+    bridge = get_sherlock_bridge()
+    args: dict = {}
+    if service_name:
+        args["service_name"] = service_name
+    if limit != 5:
+        args["limit"] = limit
+    return await bridge.call_tool("get_session_context", args)
+
+
+@mcp_server.tool()
+async def hivemind_sherlock_get_frustration_context(
+    prompt: str = "",
+    service_name: str = "",
+) -> str:
+    """Detect if the engineer is in a frustration or retry loop.
+
+    Returns mode=ESCALATION when frustrated, triggering a broader
+    investigation strategy.
+
+    Args:
+        prompt: The engineer's message text for language analysis.
+        service_name: Optional service name to check retry count for.
+    """
+    bridge = get_sherlock_bridge()
+    args: dict = {}
+    if prompt:
+        args["prompt"] = prompt
+    if service_name:
+        args["service_name"] = service_name
+    return await bridge.call_tool("get_frustration_context", args)
+
+
+@mcp_server.tool()
+async def hivemind_sherlock_get_structured_report(
+    service_name: str = "",
+    format: str = "full",
+) -> str:
+    """Return the most recent Sherlock investigation as structured JSON.
+
+    Supports 'full', 'summary', and 'metrics' formats.
+
+    Args:
+        service_name: Optional service to get report for.
+        format: 'full' | 'summary' | 'metrics' (default: full).
+    """
+    bridge = get_sherlock_bridge()
+    args: dict = {}
+    if service_name:
+        args["service_name"] = service_name
+    if format != "full":
+        args["format"] = format
+    return await bridge.call_tool("get_structured_report", args)
+
+
+@mcp_server.tool()
+async def hivemind_sherlock_get_nrql_context(
+    domain: str = "all",
+) -> str:
+    """Get real service names, monitor names, and attribute names for NRQL construction.
+
+    Call before constructing any NRQL query.
+
+    Args:
+        domain: Domain to get context for (apm, k8s, logs, alerts, synthetics, all).
+    """
+    bridge = get_sherlock_bridge()
+    args: dict = {}
+    if domain != "all":
+        args["domain"] = domain
+    return await bridge.call_tool("get_nrql_context", args)
+
+
+@mcp_server.tool()
+async def hivemind_sherlock_investigate_synthetic(
+    monitor_name: str = "",
+    since_minutes: int = 60,
+) -> str:
+    """Deep investigation of a failing synthetic monitor with APM correlation.
+
+    Args:
+        monitor_name: Synthetic monitor name to investigate.
+        since_minutes: Time window in minutes (default: 60).
+    """
+    bridge = get_sherlock_bridge()
+    return await bridge.call_tool("investigate_synthetic", {
+        "monitor_name": monitor_name,
+        "since_minutes": since_minutes,
+    })
+
+
+@mcp_server.tool()
+async def hivemind_sherlock_get_service_golden_signals(
+    service_name: str = "",
+    since_minutes: int = 30,
+) -> str:
+    """Get the four golden signals (latency, traffic, errors, saturation) for a service.
+
+    Args:
+        service_name: APM service name.
+        since_minutes: Time window in minutes (default: 30).
+    """
+    bridge = get_sherlock_bridge()
+    return await bridge.call_tool("get_service_golden_signals", {
+        "service_name": service_name,
+        "since_minutes": since_minutes,
+    })
+
+
+@mcp_server.tool()
+async def hivemind_sherlock_get_k8s_health(
+    service_name: str = "",
+    namespace: str = "",
+    since_minutes: int = 30,
+    cluster_name: str = "",
+) -> str:
+    """Get Kubernetes health data (pods, restarts, resource usage) for a service.
+
+    Args:
+        service_name: Service name.
+        namespace: K8s namespace.
+        since_minutes: Time window in minutes (default: 30).
+        cluster_name: Optional cluster name to scope the query.
+    """
+    bridge = get_sherlock_bridge()
+    args: dict = {}
+    if service_name:
+        args["service_name"] = service_name
+    if namespace:
+        args["namespace"] = namespace
+    if since_minutes != 30:
+        args["since_minutes"] = since_minutes
+    if cluster_name:
+        args["cluster_name"] = cluster_name
+    return await bridge.call_tool("get_k8s_health", args)
+
+
+@mcp_server.tool()
+async def hivemind_sherlock_search_logs(
+    service_name: str = "",
+    severity: str = "",
+    keyword: str = "",
+    since_minutes: int = 60,
+    limit: int = 100,
+) -> str:
+    """Search logs with filters for service, severity, and keywords.
+
+    Args:
+        service_name: Service name filter.
+        severity: Severity filter (e.g. 'ERROR', 'WARN', 'ERROR,WARN').
+        keyword: Keyword to search in messages.
+        since_minutes: Time window in minutes (default: 60).
+        limit: Max results (default: 100).
+    """
+    bridge = get_sherlock_bridge()
+    args: dict = {}
+    if service_name:
+        args["service_name"] = service_name
+    if severity:
+        args["severity"] = severity
+    if keyword:
+        args["keyword"] = keyword
+    if since_minutes != 60:
+        args["since_minutes"] = since_minutes
+    if limit != 100:
+        args["limit"] = limit
+    return await bridge.call_tool("search_logs", args)
+
+
+@mcp_server.tool()
+async def hivemind_sherlock_get_synthetic_monitors() -> str:
+    """List all synthetic monitors for the active New Relic account."""
+    bridge = get_sherlock_bridge()
+    return await bridge.call_tool("get_synthetic_monitors", {})
+
+
+@mcp_server.tool()
+async def hivemind_sherlock_get_monitor_status(
+    monitor_name: str = "",
+    since_minutes: int = 60,
+) -> str:
+    """Check if a specific synthetic monitor is passing or failing.
+
+    Args:
+        monitor_name: Synthetic monitor name.
+        since_minutes: Time window in minutes (default: 60).
+    """
+    bridge = get_sherlock_bridge()
+    return await bridge.call_tool("get_monitor_status", {
+        "monitor_name": monitor_name,
+        "since_minutes": since_minutes,
+    })
+
+
+@mcp_server.tool()
+async def hivemind_sherlock_get_monitor_results(
+    monitor_name: str = "",
+    result_filter: str = "",
+    since_minutes: int = 60,
+    limit: int = 50,
+) -> str:
+    """Get raw run results for a synthetic monitor.
+
+    Args:
+        monitor_name: Synthetic monitor name.
+        result_filter: Filter by result type ('FAILED' or 'SUCCESS').
+        since_minutes: Time window in minutes (default: 60).
+        limit: Max results (default: 50).
+    """
+    bridge = get_sherlock_bridge()
+    args: dict = {"monitor_name": monitor_name}
+    if result_filter:
+        args["result_filter"] = result_filter
+    if since_minutes != 60:
+        args["since_minutes"] = since_minutes
+    if limit != 50:
+        args["limit"] = limit
+    return await bridge.call_tool("get_monitor_results", args)
+
+
+@mcp_server.tool()
+async def hivemind_sherlock_get_apm_applications() -> str:
+    """List all APM applications for the active New Relic account."""
+    bridge = get_sherlock_bridge()
+    return await bridge.call_tool("get_apm_applications", {})
+
+
+@mcp_server.tool()
+async def hivemind_sherlock_get_app_metrics(
+    app_name: str = "",
+    since_minutes: int = 30,
+) -> str:
+    """Get key performance metrics for an APM application.
+
+    Args:
+        app_name: APM application name.
+        since_minutes: Time window in minutes (default: 30).
+    """
+    bridge = get_sherlock_bridge()
+    return await bridge.call_tool("get_app_metrics", {
+        "app_name": app_name,
+        "since_minutes": since_minutes,
+    })
+
+
+@mcp_server.tool()
+async def hivemind_sherlock_get_deployments(
+    app_name: str = "",
+    limit: int = 10,
+) -> str:
+    """Get recent deployment history for an APM application.
+
+    Args:
+        app_name: APM application name.
+        limit: Max deployments to return (default: 10).
+    """
+    bridge = get_sherlock_bridge()
+    return await bridge.call_tool("get_deployments", {
+        "app_name": app_name,
+        "limit": limit,
+    })
+
+
+@mcp_server.tool()
+async def hivemind_sherlock_get_alerts() -> str:
+    """Get all alert policies for the active New Relic account."""
+    bridge = get_sherlock_bridge()
+    return await bridge.call_tool("get_alerts", {})
+
+
+@mcp_server.tool()
+async def hivemind_sherlock_get_incidents(
+    state: str = "open",
+) -> str:
+    """Get incidents filtered by state (open or closed).
+
+    Returns account-wide incidents. Use get_service_incidents for
+    service-specific incidents.
+
+    Args:
+        state: Incident state filter ('open' or 'closed').
+    """
+    bridge = get_sherlock_bridge()
+    return await bridge.call_tool("get_incidents", {"state": state})
+
+
+@mcp_server.tool()
+async def hivemind_sherlock_get_service_incidents(
+    service_name: str = "",
+) -> str:
+    """Get incidents related to a specific service or monitor.
+
+    Args:
+        service_name: Service or monitor name to search for.
+    """
+    bridge = get_sherlock_bridge()
+    return await bridge.call_tool("get_service_incidents", {
+        "service_name": service_name,
+    })
+
+
+@mcp_server.tool()
+async def hivemind_sherlock_run_nrql_query(
+    nrql: str = "",
+) -> str:
+    """Execute a raw NRQL query. Use get_nrql_context first to get valid names.
+
+    Args:
+        nrql: NRQL query to execute.
+    """
+    bridge = get_sherlock_bridge()
+    return await bridge.call_tool("run_nrql_query", {"nrql": nrql})
+
+
+@mcp_server.tool()
+async def hivemind_sherlock_get_service_dependencies(
+    service_name: str = "",
+    direction: str = "both",
+    include_external: bool = False,
+    max_depth: int = 2,
+) -> str:
+    """Get upstream and downstream service dependencies for an APM service.
+
+    Args:
+        service_name: APM service name.
+        direction: 'downstream', 'upstream', or 'both' (default: both).
+        include_external: Include external endpoint dependencies (default: False).
+        max_depth: Maximum dependency depth 1-5 (default: 2).
+    """
+    bridge = get_sherlock_bridge()
+    return await bridge.call_tool("get_service_dependencies", {
+        "service_name": service_name,
+        "direction": direction,
+        "include_external": include_external,
+        "max_depth": max_depth,
+    })
+
+
+@mcp_server.tool()
+async def hivemind_sherlock_resolve_account(
+    service_name: str = "",
+) -> str:
+    """Resolve which New Relic account a service belongs to.
+
+    Call BEFORE connect_account when investigating a service.
+    Returns the profile_name and account_id for instant connection.
+
+    Args:
+        service_name: The service, monitor, or entity name to look up.
+    """
+    bridge = get_sherlock_bridge()
+    return await bridge.call_tool("resolve_account", {
+        "service_name": service_name,
+    })
+
+
+# ---------------------------------------------------------------------------
 TOOL_REGISTRY = {
     "hivemind_query_memory": hivemind_query_memory,
     "hivemind_query_graph": hivemind_query_graph,
@@ -1481,13 +1921,39 @@ TOOL_REGISTRY = {
     "hivemind_hawkeye_parse_terraform_plan": hivemind_hawkeye_parse_terraform_plan,
     "hivemind_hawkeye_release_precheck_report": hivemind_hawkeye_release_precheck_report,
     "hivemind_hawkeye_ping": hivemind_hawkeye_ping,
+    # Sherlock observability tools (MCP-to-MCP bridge)
+    "hivemind_sherlock_connect_account": hivemind_sherlock_connect_account,
+    "hivemind_sherlock_list_profiles": hivemind_sherlock_list_profiles,
+    "hivemind_sherlock_learn_account": hivemind_sherlock_learn_account,
+    "hivemind_sherlock_get_account_summary": hivemind_sherlock_get_account_summary,
+    "hivemind_sherlock_get_session_context": hivemind_sherlock_get_session_context,
+    "hivemind_sherlock_get_frustration_context": hivemind_sherlock_get_frustration_context,
+    "hivemind_sherlock_get_structured_report": hivemind_sherlock_get_structured_report,
+    "hivemind_sherlock_get_nrql_context": hivemind_sherlock_get_nrql_context,
+    "hivemind_sherlock_investigate_synthetic": hivemind_sherlock_investigate_synthetic,
+    "hivemind_sherlock_get_service_golden_signals": hivemind_sherlock_get_service_golden_signals,
+    "hivemind_sherlock_get_k8s_health": hivemind_sherlock_get_k8s_health,
+    "hivemind_sherlock_search_logs": hivemind_sherlock_search_logs,
+    "hivemind_sherlock_get_synthetic_monitors": hivemind_sherlock_get_synthetic_monitors,
+    "hivemind_sherlock_get_monitor_status": hivemind_sherlock_get_monitor_status,
+    "hivemind_sherlock_get_monitor_results": hivemind_sherlock_get_monitor_results,
+    "hivemind_sherlock_get_apm_applications": hivemind_sherlock_get_apm_applications,
+    "hivemind_sherlock_get_app_metrics": hivemind_sherlock_get_app_metrics,
+    "hivemind_sherlock_get_deployments": hivemind_sherlock_get_deployments,
+    "hivemind_sherlock_get_alerts": hivemind_sherlock_get_alerts,
+    "hivemind_sherlock_get_incidents": hivemind_sherlock_get_incidents,
+    "hivemind_sherlock_get_service_incidents": hivemind_sherlock_get_service_incidents,
+    "hivemind_sherlock_run_nrql_query": hivemind_sherlock_run_nrql_query,
+    "hivemind_sherlock_get_service_dependencies": hivemind_sherlock_get_service_dependencies,
+    "hivemind_sherlock_resolve_account": hivemind_sherlock_resolve_account,
 }
 
 
 # Expected tool counts
 _HIVEMIND_TOOL_COUNT = 21
 _HAWKEYE_TOOL_COUNT = 25
-_TOTAL_TOOL_COUNT = _HIVEMIND_TOOL_COUNT + _HAWKEYE_TOOL_COUNT
+_SHERLOCK_TOOL_COUNT = 24
+_TOTAL_TOOL_COUNT = _HIVEMIND_TOOL_COUNT + _HAWKEYE_TOOL_COUNT + _SHERLOCK_TOOL_COUNT
 
 
 def run_self_test() -> bool:
@@ -1500,8 +1966,12 @@ def run_self_test() -> bool:
     print("=" * 50)
 
     all_ok = True
-    hivemind_tools = sorted(k for k in TOOL_REGISTRY if not k.startswith("hivemind_hawkeye_"))
+    hivemind_tools = sorted(
+        k for k in TOOL_REGISTRY
+        if not k.startswith("hivemind_hawkeye_") and not k.startswith("hivemind_sherlock_")
+    )
     hawkeye_tools = sorted(k for k in TOOL_REGISTRY if k.startswith("hivemind_hawkeye_"))
+    sherlock_tools = sorted(k for k in TOOL_REGISTRY if k.startswith("hivemind_sherlock_"))
 
     print(f"\n  HiveMind core tools ({len(hivemind_tools)}/{_HIVEMIND_TOOL_COUNT}):")
     for name in hivemind_tools:
@@ -1514,6 +1984,15 @@ def run_self_test() -> bool:
 
     print(f"\n  Hawkeye bridge tools ({len(hawkeye_tools)}/{_HAWKEYE_TOOL_COUNT}):")
     for name in hawkeye_tools:
+        fn = TOOL_REGISTRY[name]
+        if callable(fn):
+            print(f"    [OK] {name}")
+        else:
+            print(f"    [FAIL] {name} — not callable")
+            all_ok = False
+
+    print(f"\n  Sherlock bridge tools ({len(sherlock_tools)}/{_SHERLOCK_TOOL_COUNT}):")
+    for name in sherlock_tools:
         fn = TOOL_REGISTRY[name]
         if callable(fn):
             print(f"    [OK] {name}")

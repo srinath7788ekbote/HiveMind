@@ -41,39 +41,53 @@ def _load_config(config_path: str) -> dict:
     # Try YAML first
     try:
         import yaml
-        return yaml.safe_load(content) or {}
+        config = yaml.safe_load(content) or {}
     except ImportError:
-        pass
+        config = None
 
-    # Try JSON
-    try:
-        return json.loads(content)
-    except json.JSONDecodeError:
-        pass
+    if config is None:
+        # Try JSON
+        try:
+            config = json.loads(content)
+        except json.JSONDecodeError:
+            config = None
 
-    # Manual YAML-like parsing for simple configs
-    config = {"repos": []}
-    current_repo = None
-    for line in content.split('\n'):
-        line = line.strip()
-        if not line or line.startswith('#'):
-            continue
-        if line.startswith('client_name:'):
-            config['client_name'] = line.split(':', 1)[1].strip().strip('"\'')
-        elif line.startswith('- name:'):
-            if current_repo:
-                config["repos"].append(current_repo)
-            current_repo = {"name": line.split(':', 1)[1].strip().strip('"\''), "branches": []}
-        elif current_repo and line.startswith('path:'):
-            current_repo["path"] = line.split(':', 1)[1].strip().strip('"\'')
-        elif current_repo and line.startswith('type:'):
-            current_repo["type"] = line.split(':', 1)[1].strip().strip('"\'')
-        elif current_repo and line.startswith('- ') and current_repo.get("branches") is not None:
-            branch = line[2:].strip().strip('"\'')
-            if branch and not branch.startswith('name:'):
-                current_repo["branches"].append(branch)
-    if current_repo:
-        config["repos"].append(current_repo)
+    if config is None:
+        # Manual YAML-like parsing for simple configs
+        config = {"repos": []}
+        current_repo = None
+        for line in content.split('\n'):
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            if line.startswith('client_name:'):
+                config['client_name'] = line.split(':', 1)[1].strip().strip('"\'')
+            elif line.startswith('- name:'):
+                if current_repo:
+                    config["repos"].append(current_repo)
+                current_repo = {"name": line.split(':', 1)[1].strip().strip('"\''), "branches": []}
+            elif current_repo and line.startswith('path:'):
+                current_repo["path"] = line.split(':', 1)[1].strip().strip('"\'')
+            elif current_repo and line.startswith('type:'):
+                current_repo["type"] = line.split(':', 1)[1].strip().strip('"\'')
+            elif current_repo and line.startswith('- ') and current_repo.get("branches") is not None:
+                branch = line[2:].strip().strip('"\'')
+                if branch and not branch.startswith('name:'):
+                    current_repo["branches"].append(branch)
+        if current_repo:
+            config["repos"].append(current_repo)
+
+    # Resolve shared_branches: repos without explicit branches inherit the shared list
+    shared = config.get("shared_branches")
+    if shared:
+        for repo in config.get("repos", []):
+            if not repo.get("branches"):
+                branches = list(shared)
+                # If repo specifies default_branch, replace 'main' with that value
+                repo_default = repo.get("default_branch")
+                if repo_default and "main" in branches:
+                    branches[branches.index("main")] = repo_default
+                repo["branches"] = branches
 
     return config
 

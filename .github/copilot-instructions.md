@@ -440,35 +440,158 @@ Use them when a user provides a Harness pipeline URL or asks about live pipeline
 | `hivemind_hawkeye_release_precheck_report` | Combined release precheck report |
 | `hivemind_hawkeye_ping` | Health check — verify Hawkeye is running |
 
+### Sherlock Observability Tools (24)
+
+These tools connect to the live New Relic API via the Sherlock subprocess MCP server.
+Use them when investigating service health, performance, logs, alerts, or K8s pod status.
+
+| MCP Tool | Purpose |
+|----------|--------|
+| `hivemind_sherlock_connect_account` | Connect to a New Relic account — call first before other Sherlock tools |
+| `hivemind_sherlock_list_profiles` | List saved New Relic credential profiles |
+| `hivemind_sherlock_learn_account` | Discover all entities in the active account (caches results) |
+| `hivemind_sherlock_get_account_summary` | Complete intelligence summary for the active account |
+| `hivemind_sherlock_get_session_context` | Investigation history from the current session |
+| `hivemind_sherlock_get_frustration_context` | Detect engineer frustration/retry loops |
+| `hivemind_sherlock_get_structured_report` | Machine-readable investigation report (JSON) |
+| `hivemind_sherlock_get_nrql_context` | Get valid names/attributes before constructing NRQL |
+| `hivemind_sherlock_investigate_synthetic` | Deep investigation of a failing synthetic monitor |
+| `hivemind_sherlock_get_service_golden_signals` | **Key tool** — latency, traffic, errors, saturation for a service |
+| `hivemind_sherlock_get_k8s_health` | Pod health, restarts, resource usage, deployments |
+| `hivemind_sherlock_search_logs` | Search logs by service, severity, keyword |
+| `hivemind_sherlock_get_synthetic_monitors` | List all synthetic monitors with status |
+| `hivemind_sherlock_get_monitor_status` | Check if a specific monitor is passing/failing |
+| `hivemind_sherlock_get_monitor_results` | Raw run results for a synthetic monitor |
+| `hivemind_sherlock_get_apm_applications` | List all APM applications |
+| `hivemind_sherlock_get_app_metrics` | Key performance metrics for an APM app |
+| `hivemind_sherlock_get_deployments` | Recent deployment history for an APM app |
+| `hivemind_sherlock_get_alerts` | All alert policies for the active account |
+| `hivemind_sherlock_get_incidents` | Incidents filtered by state (open/closed) |
+| `hivemind_sherlock_get_service_incidents` | Incidents related to a specific service |
+| `hivemind_sherlock_run_nrql_query` | Execute a raw NRQL query |
+| `hivemind_sherlock_get_service_dependencies` | Upstream/downstream service dependencies |
+| `hivemind_sherlock_resolve_account` | Resolve which NR account owns a service |
+
 ### Tool Calling Workflow
 
 1. **Always call `hivemind_get_active_client` first** to know which client to pass to other tools
 2. **For any branch-specific query** — call `hivemind_check_branch` first to validate the branch exists and is indexed
-3. **For any KB question** — call `hivemind_query_memory` first, then use specialised tools based on results
-4. **For Harness pipeline URLs** — call `hivemind_hawkeye_diagnose(url=...)` first, then cross-reference with KB
+3. **All three systems (Hawkeye, KB, Sherlock) are independent** — fire them in parallel based on intent, not sequentially
+4. **No fixed order** — the situation determines which systems activate and in what combination
 5. **For create/modify tasks** — call read tools first to understand existing patterns, then generate content, then call `hivemind_write_file`
 6. **Stream your thinking** — explain which tools you are calling and why as you work
 7. **Cite file paths** from tool results in every answer
 
-### Hawkeye + HiveMind Combined Workflow
+### Parallel Adaptive Investigation Model
 
-When a user provides a Harness pipeline URL or mentions a pipeline failure:
+HiveMind uses **intent-driven parallel dispatch** — NOT a fixed sequential chain.
+The team-lead classifies the user's intent and fires all relevant systems simultaneously.
+
+#### Architecture
 
 ```
-Step 1: hivemind_hawkeye_diagnose(url="<harness_url>")
-        → Get full failure report: service name, failed stage, error message, logs
-
-Step 2: hivemind_query_memory(client="<client>", query="<service_name> <error_type>")
-        → Cross-reference with indexed Helm values, Terraform configs, secrets
-
-Step 3: hivemind_impact_analysis(client="<client>", entity="<service_name>")
-        → Assess blast radius and downstream dependencies
-
-Step 4: hivemind_get_secret_flow(client="<client>", secret="<secret_name>")
-        → If error is credential/secret related, trace the full lifecycle
-
-Step 5: Synthesize findings from live Hawkeye data + indexed KB knowledge
+                         USER INPUT
+                             │
+                     ┌───────▼────────┐
+                     │  TEAM LEAD     │
+                     │  1. Parse      │
+                     │  2. Classify   │
+                     │  3. Pick lanes │
+                     └───────┬────────┘
+                             │
+               ┌─────────────┼─────────────┐
+               │             │             │
+      ┌────────▼──────┐ ┌───▼─────┐ ┌─────▼────────┐
+      │   HAWKEYE     │ │   KB    │ │  SHERLOCK     │
+      │  (pipeline)   │ │ (always)│ │  (live state) │
+      └────────┬──────┘ └───┬─────┘ └─────┬────────┘
+               │             │             │
+               └─────────────┼─────────────┘
+                             │
+                     ┌───────▼────────┐
+                     │  TEAM LEAD     │
+                     │  SYNTHESIS     │
+                     │  • Cross-ref   │
+                     │  • Root cause  │
+                     │  • Confidence  │
+                     └────────────────┘
 ```
+
+#### Intent Classification → Lane Activation
+
+The team-lead classifies intent and activates lanes. **All activated lanes fire in parallel.**
+
+| Intent | Signals | Lanes Activated |
+|--------|---------|-----------------|
+| **PIPELINE_FAILURE** | Harness URL, "pipeline failed", "deploy failed", execution ID | **Hawkeye + KB + Sherlock** |
+| **SERVICE_DOWN** | "service is down", "502", "503", "not responding", "timeout" | **Sherlock + KB** (+ Hawkeye if recent deploy suspected) |
+| **POD_CRASH** | "CrashLoopBackOff", "OOMKilled", "pod restarting", kubectl output | **Sherlock + KB** |
+| **PERFORMANCE** | "slow", "latency", "high response time", "degraded" | **Sherlock + KB** |
+| **SECRET_ERROR** | "unauthorized", "403", "credential", "secret", "KeyVault" | **KB + Sherlock** |
+| **CONFIG_QUESTION** | "what config", "show values", "which env uses" | **KB only** |
+| **DEPLOYMENT_ISSUE** | "rollout stuck", "image pull", "replica 0" | **Hawkeye + Sherlock + KB** |
+| **ALERT_INCIDENT** | "alert firing", "incident", "PagerDuty" | **Sherlock + KB** (+ Hawkeye if deployment correlated) |
+| **FULL_INCIDENT** | Multiple signals, or logs/errors pasted | **All three** |
+
+#### Lane Definitions (what each system does when activated)
+
+**Hawkeye Lane** (pipeline/deployment data):
+```
+PARALLEL:
+  hawkeye_diagnose(url/execution_id)       — full failure report
+  hawkeye_get_failure_pattern(pipeline)    — is this recurring?
+```
+
+**KB Lane** (indexed repo knowledge — ALWAYS activated):
+```
+PARALLEL:
+  query_memory(service + error_type)        — Helm, TF, pipeline matches
+  get_entity(service)                       — metadata + dependencies
+  impact_analysis(service)                  — blast radius
+THEN (conditional, based on results):
+  get_secret_flow(secret)                   — if credential error
+  get_pipeline(pipeline)                    — if deployment error
+  hti_get_skeleton → hti_fetch_nodes        — if specific config needed
+```
+
+**Sherlock Lane** (live observability):
+```
+FIRST: sherlock_connect_account(profile)
+THEN PARALLEL:
+  get_service_golden_signals(service)       — latency/errors/traffic
+  get_k8s_health(service, namespace)        — pod status, restarts
+  search_logs(service, severity=ERROR)      — recent error logs
+  get_deployments(service)                  — last deploy correlation
+  get_service_incidents(service)            — active alerts
+```
+
+#### Adaptive Re-routing (when parallel results reveal new info)
+
+Sometimes Phase 1 results reveal something that requires spinning up a system that wasn't initially activated:
+
+| Finding from Phase 1 | Action |
+|---------------------|--------|
+| Sherlock finds recent deployment (wasn't expected) | → Fire Hawkeye for deploy pipeline details |
+| Hawkeye shows service name not in KB | → Widen KB search with alternative names |
+| KB shows service depends on another service | → Fire Sherlock for the dependency too |
+| Sherlock shows healthy pods but errors in logs | → Fire KB secret flow + HTI for config |
+| Hawkeye shows child pipeline failed | → Fire Hawkeye `get_child_execution` |
+| Sherlock golden signals show dependency degraded | → Fire Sherlock + KB for the upstream service |
+
+#### When to Use Which System
+
+| Question Type | System | Tools |
+|---------------|--------|-------|
+| Pipeline failed / stuck / errored | **Hawkeye** | `diagnose`, `get_execution`, `get_step_logs` |
+| What config does this service use? | **HiveMind KB** | `query_memory`, `hti_get_skeleton`, `read_file` |
+| What secret is misconfigured? | **HiveMind KB** | `get_secret_flow`, `query_memory` |
+| Is the service healthy right now? | **Sherlock** | `get_service_golden_signals`, `get_k8s_health` |
+| What are the live error logs? | **Sherlock** | `search_logs` |
+| When was this last deployed? | **Sherlock** | `get_deployments` |
+| Are pods crashing / OOMKilled? | **Sherlock** | `get_k8s_health` |
+| Is there an active alert/incident? | **Sherlock** | `get_alerts`, `get_service_incidents` |
+| What depends on this service? | **HiveMind KB + Sherlock** | `impact_analysis` + `get_service_dependencies` |
+| Pipeline failed + service is down | **All three** | Full parallel dispatch |
 
 ### HTI vs KB Search — When to Use Which
 
@@ -581,25 +704,39 @@ performs a **completeness audit** before the team-lead produces the final report
 ### Semantic Intent Classification (team-lead)
 
 The team-lead classifies user intent semantically (not by keyword matching) into these
-categories, each with specific routing:
+categories, each with specific routing and data lane activation:
 
-| Intent | Signals | Routing |
-|--------|---------|---------|
-| **INCIDENT** | logs, errors, "broken", "failing", stack traces | /triage → investigator |
-| **STRUCTURAL** | "show me", "what are", "list", "what config" | HTI tools directly (no subagents) |
-| **DEPENDENCY** | "blast radius", "if I change", "what breaks" | Phase 1: investigator + analyst → Phase 2: architect + security |
-| **DIFF** | "what changed", "compare", "between" | devops only |
-| **SECRET_FLOW** | "secret", "credential", "KeyVault" | Sequential: investigator → security |
-| **PLANNING** | "how should I", "steps to", "plan for" | planner → specialist |
-| **GENERAL** | anything else | investigator → specialist |
+| Intent | Signals | Agent Routing | Data Lanes |
+|--------|---------|---------------|------------|
+| **INCIDENT** | logs, errors, "broken", "failing", stack traces | /triage → investigator | **KB + Sherlock** (+ Hawkeye if deploy suspected) |
+| **PIPELINE_FAILURE** | Harness URL, "deploy failed", execution ID | devops + investigator | **Hawkeye + KB + Sherlock** |
+| **SERVICE_DOWN** | "502", "not responding", "timeout" | investigator | **Sherlock + KB** |
+| **POD_CRASH** | "CrashLoopBackOff", "OOMKilled", kubectl output | investigator | **Sherlock + KB** |
+| **STRUCTURAL** | "show me", "what are", "list", "what config" | HTI tools directly (no subagents) | **KB only** |
+| **DEPENDENCY** | "blast radius", "if I change", "what breaks" | analyst → architect + security | **KB + Sherlock** |
+| **DIFF** | "what changed", "compare", "between" | devops only | **KB only** |
+| **SECRET_FLOW** | "secret", "credential", "KeyVault" | investigator → security | **KB + Sherlock** |
+| **PLANNING** | "how should I", "steps to", "plan for" | planner → specialist | **KB only** |
+| **GENERAL** | anything else | investigator → specialist | **KB** (+ Sherlock if health-related) |
 
-When intent is genuinely unclear → default to INCIDENT routing.
+When intent is genuinely unclear → default to INCIDENT routing with all three lanes.
 
 ### Phased Parallel Execution
 
-- **Phase 1** (RAW DATA GATHERING): investigator + devops run in parallel to gather files
+**Data Lane Phase** (fires FIRST, in parallel):
+- **KB Lane** (ALWAYS): `query_memory` + `get_entity` + `impact_analysis`
+- **Sherlock Lane** (if activated): `connect_account` → `golden_signals` + `k8s_health` + `search_logs`
+- **Hawkeye Lane** (if activated): `diagnose` + `get_failure_pattern`
+
+**Agent Phase** (fires AFTER data lanes return, using their results):
+- **Phase 1** (RAW DATA GATHERING): investigator + devops run in parallel to analyze data lane results
 - **Phase 2** (SPECIALIZED ANALYSIS): security + analyst + architect run in parallel using Phase 1 results
 - **Phase 3** (SYNTHESIS): team-lead combines all findings, runs completeness audit
+
+**Adaptive Re-routing** (between phases):
+- Sherlock finds recent deploy → fire Hawkeye lane
+- KB shows dependency on another service → fire Sherlock for that service too
+- Hawkeye shows child pipeline → fire `get_child_execution`
 
 ### Shared Investigation Registry
 
@@ -757,11 +894,11 @@ If **2 or more** keywords/patterns from the lists above appear in a single user 
 Upon trigger confirmation, execute this sequence **immediately**. Do NOT ask the user before starting.
 
 ```
-STEP 1 — CONTEXT
+PHASE 1 — CONTEXT + SIGNAL EXTRACTION (instant, no tool calls)
+
   Call hivemind_get_active_client()
   → Determines which client KB to search
 
-STEP 2 — SIGNAL EXTRACTION
   Parse the pasted content and extract:
     • service_name  — from pod names, container names, namespace labels, log source fields
     • error_type    — the specific error class (OOMKilled, connection refused, etc.)
@@ -769,38 +906,57 @@ STEP 2 — SIGNAL EXTRACTION
     • secrets_refs  — any Key Vault, secret, or config map references
     • image_refs    — container image names and tags
     • timestamps    — time range of the incident
+    • pipeline_url  — Harness URL if provided
 
-STEP 2b — STRUCTURAL ROUTING (if applicable)
-  IF the query is structural (asks about specific stages, configs, variables, steps, specs):
-    Call hivemind_hti_get_skeleton BEFORE or INSTEAD OF query_memory
-    Then call hivemind_hti_fetch_nodes on the relevant node_paths
+  Classify intent:
+    PIPELINE_FAILURE | SERVICE_DOWN | POD_CRASH | PERFORMANCE |
+    SECRET_ERROR | DEPLOYMENT_ISSUE | ALERT_INCIDENT | FULL_INCIDENT
 
-STEP 3 — KB SEARCH
-  Call hivemind_query_memory(client=<client>, query="<service_name> <error_type>")
-  Call hivemind_query_memory(client=<client>, query="<service_name> deployment configuration")
-  → Search for Helm values, Terraform config, pipeline definitions related to the service
+PHASE 2 — PARALLEL DISPATCH (all activated lanes fire simultaneously)
 
-STEP 4 — ENTITY LOOKUP
-  IF service_name was extracted:
-    Call hivemind_get_entity(client=<client>, name="<service_name>")
-    → Get full entity metadata: repos, environments, dependencies
+  Based on intent classification, activate lanes:
 
-STEP 5 — IMPACT ANALYSIS (NEVER SKIP)
-  Call hivemind_impact_analysis(client=<client>, entity="<service_name>")
-  → Get upstream/downstream dependency chain — this is CRITICAL for root cause
+  ┌─── HAWKEYE LANE (if pipeline URL provided OR deployment-related error) ───┐
+  │  hivemind_hawkeye_diagnose(url=<url>)                                     │
+  │  → Get failed stage, step, error message, console logs                    │
+  │  → Extract: which service, which stage, which image version               │
+  └───────────────────────────────────────────────────────────────────────────┘
 
-STEP 6 — SECRET FLOW (conditional)
-  IF logs contain secret, KeyVault, config map, or credential errors:
-    Call hivemind_get_secret_flow(client=<client>, secret="<secret_name>")
-    → Trace full secret lifecycle: Key Vault → Kubernetes Secret → Helm → Pod
+  ┌─── KB LANE (ALWAYS activated) ────────────────────────────────────────────┐
+  │  PARALLEL:                                                                 │
+  │    hivemind_query_memory(query="<service_name> <error_type>")             │
+  │    hivemind_get_entity(name="<service_name>")                             │
+  │    hivemind_impact_analysis(entity="<service_name>")                      │
+  │  THEN (conditional):                                                       │
+  │    hivemind_get_secret_flow(secret=...) — if credential/access error      │
+  │    hivemind_get_pipeline(name=...) — if deployment error                  │
+  │    hivemind_hti_get_skeleton + fetch_nodes — if specific config needed    │
+  └───────────────────────────────────────────────────────────────────────────┘
 
-STEP 7 — PIPELINE LOOKUP (conditional)
-  IF logs reference a deployment, rollout, release, or pipeline:
-    Call hivemind_get_pipeline(client=<client>, name="<pipeline_name>")
-    → Get pipeline definition, stages, approval gates, artifact sources
+  ┌─── SHERLOCK LANE (if service health / pod / OOM / latency / alert) ───────┐
+  │  FIRST: hivemind_sherlock_connect_account(profile_name="DFIN_AD")         │
+  │  THEN PARALLEL:                                                            │
+  │    hivemind_sherlock_get_service_golden_signals(service_name=...)          │
+  │    hivemind_sherlock_get_k8s_health(service_name=..., namespace=...)       │
+  │    hivemind_sherlock_search_logs(service_name=..., severity="ERROR")       │
+  │    hivemind_sherlock_get_deployments(app_name=...)                         │
+  │    hivemind_sherlock_get_service_incidents(service_name=...)               │
+  └───────────────────────────────────────────────────────────────────────────┘
 
-STEP 8 — AGENT ROUTING
-  Route all gathered data to hivemind-investigator for root cause synthesis
+PHASE 2.5 — ADAPTIVE RE-ROUTING (when Phase 2 reveals new signals)
+
+  IF Sherlock finds recent deployment → fire Hawkeye for deploy details
+  IF KB shows dependency on another service → fire Sherlock for that service
+  IF Hawkeye shows child pipeline → fire hawkeye_get_child_execution
+  IF Sherlock shows healthy pods but log errors → fire KB secret flow
+
+PHASE 3 — SYNTHESIS + AGENT ROUTING
+
+  Team-lead receives ALL results from all lanes and:
+  1. Cross-references pipeline data ↔ KB config ↔ live health
+  2. Identifies contradictions between systems
+  3. Routes to specialist agents if deeper analysis needed
+  4. Produces root cause hypothesis with confidence level
   (see Section 8.4 for routing rules)
 ```
 
@@ -817,16 +973,17 @@ STEP 8 — AGENT ROUTING
 
 ### 8.4. Agent Routing Protocol for Incidents
 
-After automatic data gathering (Steps 1–7), route to specialist agents based on what the evidence implicates:
+After automatic data gathering (Steps 1–9), route to specialist agents based on what the evidence implicates:
 
-| Evidence Points To | Primary Agent | Consult |
-|--------------------|---------------|---------|
-| Unknown root cause, multi-signal | **hivemind-investigator** | as needed |
-| Helm values, Docker image, deployment config | **hivemind-devops** | hivemind-investigator |
-| Terraform resource, AKS config, networking | **hivemind-architect** | hivemind-investigator |
-| Key Vault, secrets, RBAC, managed identity | **hivemind-security** | hivemind-investigator |
-| Cross-service cascading failure | **hivemind-analyst** | hivemind-investigator |
-| Needs a remediation runbook | **hivemind-planner** | hivemind-devops |
+| Evidence Points To | Primary Agent | Consult | Live Data Source |
+|--------------------|---------------|---------|------------------|
+| Unknown root cause, multi-signal | **hivemind-investigator** | as needed | Hawkeye + Sherlock |
+| Helm values, Docker image, deployment config | **hivemind-devops** | hivemind-investigator | Hawkeye |
+| Terraform resource, AKS config, networking | **hivemind-architect** | hivemind-investigator | — |
+| Key Vault, secrets, RBAC, managed identity | **hivemind-security** | hivemind-investigator | — |
+| Cross-service cascading failure | **hivemind-analyst** | hivemind-investigator | Sherlock |
+| Pod crashes, OOM, resource pressure, latency | **hivemind-investigator** | hivemind-devops | Sherlock |
+| Needs a remediation runbook | **hivemind-planner** | hivemind-devops | — |
 
 **hivemind-team-lead** MUST consolidate the final answer from all consulted agents and produce the standardized output format (Section 8.5).
 
@@ -1073,6 +1230,14 @@ YAML and HCL files are chunked by structural boundaries via `ingest/chunkers/str
 | "Show recent pipeline runs" | `hivemind_hawkeye_list_recent_executions` | `hivemind_hawkeye_get_execution` |
 | "Compare two pipeline runs" | `hivemind_hawkeye_compare_executions` | `hivemind_query_memory` |
 | "Show Terraform plan" | `hivemind_hawkeye_parse_terraform_plan(url=...)` | (none) |
+| "Is service X healthy?" | `hivemind_sherlock_connect_account` | `hivemind_sherlock_get_service_golden_signals` |
+| "Are pods crashing?" | `hivemind_sherlock_get_k8s_health` | `hivemind_sherlock_search_logs(severity="ERROR")` |
+| "Show error logs for X" | `hivemind_sherlock_search_logs` | `hivemind_sherlock_get_service_incidents` |
+| "Any active alerts?" | `hivemind_sherlock_get_alerts` | `hivemind_sherlock_get_incidents(state="open")` |
+| "When was X last deployed?" | `hivemind_sherlock_get_deployments` | `hivemind_sherlock_get_service_golden_signals` |
+| "What calls this service?" | `hivemind_sherlock_get_service_dependencies` | `hivemind_impact_analysis` |
+| "Synthetic monitor failing" | `hivemind_sherlock_investigate_synthetic` | `hivemind_sherlock_get_monitor_results` |
+| "Pipeline failed + service down" | `hivemind_hawkeye_diagnose` | Full 3-system workflow (Steps 1-10 above) |
 
 
 ---

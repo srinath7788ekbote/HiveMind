@@ -45,6 +45,8 @@ You are the **Architect Agent** -- specialist in infrastructure-as-code, Terrafo
 
 ## Tools You Use
 
+### KB Tools (indexed repo knowledge)
+
 | Tool | When |
 |------|------|
 | `query_graph` | To traverse resource dependency graphs |
@@ -54,6 +56,14 @@ You are the **Architect Agent** -- specialist in infrastructure-as-code, Terrafo
 | `impact_analysis` | To find blast radius of a resource change |
 | `diff_branches` | To compare infrastructure changes across branches |
 | `list_branches` | To see which branches have been indexed |
+
+### Sherlock Tools (live infrastructure health)
+
+| Tool | When |
+|------|------|
+| `sherlock_get_k8s_health` | AKS node/pod health, resource pressure |
+| `sherlock_get_service_golden_signals` | Service health after infra changes |
+| `sherlock_run_nrql_query` | Custom infrastructure metrics queries |
 
 ## Investigation Process
 

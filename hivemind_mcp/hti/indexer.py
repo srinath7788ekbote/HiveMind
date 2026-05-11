@@ -45,6 +45,18 @@ def _load_repos(client: str, project_root: Path = None) -> list:
     with open(repos_yaml, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
+    # Resolve shared_branches: repos without explicit branches inherit the shared list
+    shared = config.get("shared_branches")
+    if shared:
+        for repo in config.get("repos", []):
+            if not repo.get("branches"):
+                branches = list(shared)
+                # If repo specifies default_branch, replace 'main' with that value
+                repo_default = repo.get("default_branch")
+                if repo_default and "main" in branches:
+                    branches[branches.index("main")] = repo_default
+                repo["branches"] = branches
+
     return config.get("repos", [])
 
 

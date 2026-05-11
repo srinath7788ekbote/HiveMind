@@ -1,6 +1,6 @@
 # CLAUDE.md — Claude Agent Configuration for HiveMind
 
-HiveMind is a local-first SRE knowledge assistant that indexes infrastructure repos (Terraform, Harness pipelines, Helm charts, Kubernetes secrets, Spring Cloud Config settings) into a ChromaDB-backed knowledge base, then exposes 21 MCP tools + 25 Hawkeye pipeline observability tools (46 total) for semantic search, dependency graph traversal, impact analysis, secret lifecycle tracing, config lineage tracking, live pipeline diagnosis, and incident investigation across multi-repo, multi-branch client environments.
+HiveMind is a local-first SRE knowledge assistant that indexes infrastructure repos (Terraform, Harness pipelines, Helm charts, Kubernetes secrets, Spring Cloud Config settings) into a ChromaDB-backed knowledge base, then exposes 21 MCP tools + 25 Hawkeye pipeline observability tools + 24 Sherlock observability tools (70 total) for semantic search, dependency graph traversal, impact analysis, secret lifecycle tracing, config lineage tracking, live pipeline diagnosis, live observability investigation, and incident investigation across multi-repo, multi-branch client environments.
 
 ### Retrieval Pipeline
 
@@ -73,24 +73,34 @@ git commit                            # User reviews changes first
 | --------------------------------------------- | -------------------------------- |
 | Simple KB lookup ("where is X defined?")      | Handle inline, no subagents      |
 | Single-domain question (one agent can answer) | Handle inline, no subagents      |
-| Incident investigation (multi-domain)         | Spawn parallel subagents         |
+| Incident investigation (multi-domain)         | Fire parallel data lanes + spawn subagents |
 | Multi-repo or multi-service analysis          | Spawn parallel subagents         |
 | Impact analysis + runbook generation          | Sequential: analyst then planner |
 
-### Parallel Investigation Pattern
+### Parallel Adaptive Investigation Pattern
 
-When an incident is detected or a complex multi-domain question arrives, spawn these subagents IN PARALLEL:
+When an incident is detected or a complex multi-domain question arrives:
 
+**Phase 1 — Data Lanes (fire in parallel based on intent):**
 ```
-hivemind-investigator  → query_memory + impact_analysis (root cause)
+KB Lane (ALWAYS)       → query_memory + get_entity + impact_analysis
+Sherlock Lane (live)   → connect_account → golden_signals + k8s_health + search_logs
+Hawkeye Lane (deploy)  → diagnose + get_failure_pattern
+```
+
+**Phase 2 — Agent Analysis (using data lane results):**
+```
+hivemind-investigator  → cross-reference all lane results (root cause)
 hivemind-security      → get_secret_flow (if secrets/credentials involved)
-hivemind-devops        → get_pipeline + Helm chart lookup (if deployment involved)
+hivemind-devops        → pipeline + Helm analysis + Hawkeye correlation
 hivemind-architect     → Terraform/infra analysis (if infra involved)
 ```
 
+**Phase 3 — Synthesis:**
 The team-lead agent synthesizes all parallel results into a single response with:
 
-* Consolidated findings from each agent
+* Cross-referenced findings from KB + Sherlock + Hawkeye
+* Consolidated findings from each specialist agent
 * Merged source citations table
 * Single confidence rating (lowest of all agents)
 * Recommended fix with specific file paths
@@ -151,17 +161,19 @@ Agents now use **phased parallel execution** with a **shared investigation regis
 
 ***
 
-## MCP Tools (46 tools: 21 HiveMind + 25 Hawkeye)
+## MCP Tools (70 tools: 21 HiveMind + 25 Hawkeye + 24 Sherlock)
 
-All 46 tools are available via `.vscode/mcp.json`. The tools are shared between Copilot Chat and Claude Agent — no separate configuration needed. See `hivemind_mcp/hivemind_server.py` for tool definitions.
+All 70 tools are available via `.vscode/mcp.json`. The tools are shared between Copilot Chat and Claude Agent — no separate configuration needed. See `hivemind_mcp/hivemind_server.py` for tool definitions.
 
 **HiveMind core tools (21):** `hivemind_get_active_client`, `hivemind_query_memory`, `hivemind_query_graph`, `hivemind_get_entity`, `hivemind_search_files`, `hivemind_get_pipeline`, `hivemind_get_secret_flow`, `hivemind_impact_analysis`, `hivemind_diff_branches`, `hivemind_list_branches`, `hivemind_set_client`, `hivemind_write_file`, `hivemind_read_file`, `hivemind_propose_edit`, `hivemind_check_branch`, `hivemind_ensure_fresh`, `hivemind_get_active_branch`, `hivemind_save_investigation`, `hivemind_recall_investigation`, `hivemind_hti_get_skeleton`, `hivemind_hti_fetch_nodes`.
 
 **Hawkeye pipeline observability tools (25):** `hivemind_hawkeye_diagnose`, `hivemind_hawkeye_investigate_failure`, `hivemind_hawkeye_get_execution`, `hivemind_hawkeye_get_stage_detail`, `hivemind_hawkeye_get_step_logs`, `hivemind_hawkeye_get_execution_inputs`, `hivemind_hawkeye_list_recent_executions`, `hivemind_hawkeye_get_all_stages`, `hivemind_hawkeye_get_child_execution`, `hivemind_hawkeye_check_approvals`, `hivemind_hawkeye_compare_executions`, `hivemind_hawkeye_get_failure_pattern`, `hivemind_hawkeye_get_pipeline_definition`, `hivemind_hawkeye_list_pipelines`, `hivemind_hawkeye_get_input_sets`, `hivemind_hawkeye_connect_account`, `hivemind_hawkeye_list_profiles`, `hivemind_hawkeye_list_delegates`, `hivemind_hawkeye_check_delegate`, `hivemind_hawkeye_list_connectors`, `hivemind_hawkeye_check_connector`, `hivemind_hawkeye_build_link`, `hivemind_hawkeye_parse_terraform_plan`, `hivemind_hawkeye_release_precheck_report`, `hivemind_hawkeye_ping`.
 
+**Sherlock observability tools (24):** `hivemind_sherlock_connect_account`, `hivemind_sherlock_list_profiles`, `hivemind_sherlock_learn_account`, `hivemind_sherlock_get_account_summary`, `hivemind_sherlock_get_session_context`, `hivemind_sherlock_get_frustration_context`, `hivemind_sherlock_get_structured_report`, `hivemind_sherlock_get_nrql_context`, `hivemind_sherlock_investigate_synthetic`, `hivemind_sherlock_get_service_golden_signals`, `hivemind_sherlock_get_k8s_health`, `hivemind_sherlock_search_logs`, `hivemind_sherlock_get_synthetic_monitors`, `hivemind_sherlock_get_monitor_status`, `hivemind_sherlock_get_monitor_results`, `hivemind_sherlock_get_apm_applications`, `hivemind_sherlock_get_app_metrics`, `hivemind_sherlock_get_deployments`, `hivemind_sherlock_get_alerts`, `hivemind_sherlock_get_incidents`, `hivemind_sherlock_get_service_incidents`, `hivemind_sherlock_run_nrql_query`, `hivemind_sherlock_get_service_dependencies`, `hivemind_sherlock_resolve_account`.
+
 ### Tool Tiers (Quick Reference)
 
-* **Tier 1** (parallel-safe, read-only): query\_memory, query\_graph, get\_entity, search\_files, hti\_\*, check\_branch, list\_branches, read\_file, recall\_investigation, ensure\_fresh, get\_active\_\*, all hawkeye\_\* tools
+* **Tier 1** (parallel-safe, read-only): query\_memory, query\_graph, get\_entity, search\_files, hti\_\*, check\_branch, list\_branches, read\_file, recall\_investigation, ensure\_fresh, get\_active\_\*, all hawkeye\_\* tools, all sherlock\_\* tools
 * **Tier 2** (serial, analysis): impact\_analysis, diff\_branches, get\_pipeline, get\_secret\_flow, save\_investigation, set\_client
 * **Tier 3** (user approval): write\_file, propose\_edit
 
@@ -190,6 +202,34 @@ Hawkeye is integrated as a subprocess MCP server via `hivemind_mcp/hawkeye_bridg
 - User wants failure patterns → `hivemind_hawkeye_get_failure_pattern`
 
 **Configuration:** Hawkeye credentials are stored in `~/.hawkeye/profiles.json` (configured via `make connect` in the Hawkeye project). The bridge uses Hawkeye's own venv at `C:\Users\sekbote\Documents\Hawkeye\.venv\`.
+
+***
+
+## Sherlock Integration (New Relic Observability)
+
+Sherlock is integrated as a subprocess MCP server via `hivemind_mcp/sherlock_bridge.py`. It connects to the New Relic API to fetch APM metrics, K8s health, logs, alerts, synthetics, and service dependency data.
+
+**Architecture:** HiveMind MCP Server → SherlockBridge (MCP client) → Sherlock MCP Server (child process, stdio)
+
+**Key workflow — Service health investigation:**
+1. Call `hivemind_sherlock_connect_account(profile_name=...)` to connect to the New Relic account
+2. Call `hivemind_sherlock_learn_account()` to discover entities
+3. Call `hivemind_sherlock_get_service_golden_signals(service_name=...)` for golden signals
+4. Call `hivemind_sherlock_get_k8s_health(service_name=...)` for K8s pod/container health
+5. Call `hivemind_sherlock_search_logs(service_name=..., severity="ERROR")` for error logs
+6. Cross-reference with HiveMind KB via `hivemind_query_memory` for Helm/Terraform config
+
+**When to use Sherlock tools:**
+- Service performance investigation → `hivemind_sherlock_get_service_golden_signals`
+- K8s pod health check → `hivemind_sherlock_get_k8s_health`
+- Log search → `hivemind_sherlock_search_logs`
+- Synthetic monitor failures → `hivemind_sherlock_investigate_synthetic`
+- Alert/incident review → `hivemind_sherlock_get_alerts` / `hivemind_sherlock_get_service_incidents`
+- Deployment correlation → `hivemind_sherlock_get_deployments`
+- Custom NRQL queries → `hivemind_sherlock_run_nrql_query`
+- Service dependency mapping → `hivemind_sherlock_get_service_dependencies`
+
+**Configuration:** Sherlock credentials are stored in keychain profiles (configured via `connect_account` or `.env` auto-connect). The bridge uses Sherlock's own venv at `C:\Users\sekbote\Documents\sherlock\.venv\`.
 
 ***
 

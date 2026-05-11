@@ -94,16 +94,57 @@ def _wait_for_memory(max_pct: float, pause_secs: int) -> None:
     print(f"  Memory: {pct:.0f}% -- OK")
 
 
-def _load_json_files(vectors_dir: Path) -> list[tuple[str, list[dict]]]:
-    """Load all *.json vector files, returning (collection_name, chunks) pairs."""
+def _get_valid_collections(client: str, project_root: Path | None = None) -> set[str] | None:
+    """Return set of valid '{repo}_{branch}' collection names from repos.yaml.
+
+    Returns None if config cannot be loaded (skip filtering in that case).
+    """
+    root = project_root or PROJECT_ROOT
+    config_path = root / "clients" / client / "repos.yaml"
+    if not config_path.exists():
+        return None
+
+    content = config_path.read_text(encoding="utf-8")
+    try:
+        import yaml
+        config = yaml.safe_load(content) or {}
+    except ImportError:
+        return None
+
+    shared = config.get("shared_branches")
+    valid = set()
+    for repo in config.get("repos", []):
+        repo_name = repo.get("name", "")
+        if not repo_name:
+            continue
+        branches = repo.get("branches")
+        if not branches and shared:
+            branches = list(shared)
+            repo_default = repo.get("default_branch")
+            if repo_default and "main" in branches:
+                branches[branches.index("main")] = repo_default
+        branches = branches or ["main"]
+        for branch in branches:
+            valid.add(f"{repo_name}_{branch}")
+    return valid if valid else None
+
+
+def _load_json_files(vectors_dir: Path, valid_collections: set[str] | None = None) -> list[tuple[str, list[dict]]]:
+    """Load *.json vector files, returning (collection_name, chunks) pairs.
+
+    If valid_collections is provided, skip files not in the set.
+    """
     results = []
     for jf in sorted(vectors_dir.glob("*.json")):
         try:
+            collection_name = jf.stem  # filename without .json
+            if valid_collections is not None and collection_name not in valid_collections:
+                print(f"  Skipping {jf.name} -- branch no longer in repos.yaml")
+                continue
             with open(jf, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if not isinstance(data, list):
                 continue
-            collection_name = jf.stem  # filename without .json
             results.append((collection_name, data))
         except (json.JSONDecodeError, OSError) as exc:
             print(f"  WARNING: skipping {jf.name} -- {exc}")
@@ -152,7 +193,8 @@ def verify(client: str, project_root: Path | None = None) -> dict:
         print(f"  No vectors directory found at {vectors_dir}")
         return {"client": client, "total_json": 0, "total_chroma": 0, "collections": 0}
 
-    json_files = _load_json_files(vectors_dir)
+    valid = _get_valid_collections(client, root)
+    json_files = _load_json_files(vectors_dir, valid)
     if not json_files:
         print("  No JSON vector files found.")
         return {"client": client, "total_json": 0, "total_chroma": 0, "collections": 0}
@@ -236,7 +278,8 @@ def populate(
         print(f"  [!] {client} -- ChromaDB locked by another process, skipping")
         return {"client": client, "total_embedded": 0, "collections_done": 0, "skipped_lock": True}
 
-    json_files = _load_json_files(vectors_dir)
+    valid = _get_valid_collections(client, root)
+    json_files = _load_json_files(vectors_dir, valid)
     if not json_files:
         print("  No JSON vector files found.")
         return {"client": client, "total_embedded": 0, "collections_done": 0}
